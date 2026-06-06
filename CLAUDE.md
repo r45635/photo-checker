@@ -22,7 +22,29 @@ The goal: help the user decide which local backup files are safe to delete becau
 - GitHub: https://github.com/r45635/photo-checker (private)
 - Local: `/Users/vcruvellier/tools/photo_checker/`
 
-## Runtime
+## macOS setup prerequisites
+
+### Full Disk Access (required for Apple Photos)
+
+`osxphotos` reads the Photos SQLite database directly. macOS blocks this unless the terminal running the script has **Full Disk Access**:
+
+The app that needs Full Disk Access is whichever process spawns the shell running the script:
+
+| How you run the script | App to grant access to |
+|---|---|
+| From Terminal.app / iTerm2 | Terminal.app / iTerm2 |
+| Via Claude Code in VS Code | **Visual Studio Code** (Code.app) |
+| Via Claude desktop app | Claude.app |
+
+Steps:
+1. **System Settings → Privacy & Security → Full Disk Access**
+2. Add the correct app (see table above)
+3. Restart the app
+
+Without this, every file will show `apple_photos: error` and the run is useless.
+Photos.app does **not** need to be closed — Full Disk Access is the only requirement.
+
+### Python venv
 
 Always use the project venv:
 ```bash

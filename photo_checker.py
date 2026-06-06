@@ -49,12 +49,13 @@ def status_label(found: bool | None, skipped: bool) -> str:
     return 'yes' if found else 'no'
 
 
-def scan_folder(folder: Path) -> list[Path]:
+def scan_folder(folder: Path, recursive: bool = False) -> list[Path]:
+    entries = folder.rglob('*') if recursive else folder.iterdir()
     return sorted(
-        f for f in folder.iterdir()
+        f for f in entries
         if f.is_file()
         and f.suffix.lower() in IMAGE_EXTENSIONS
-        and not f.name.startswith('._')   # skip macOS resource fork files
+        and not f.name.startswith('._')
     )
 
 
@@ -307,6 +308,7 @@ def main():
                         help='Show which files would be deleted (safe_to_delete=YES) without making any changes')
     parser.add_argument('--delete',        action='store_true',
                         help='Move files marked safe_to_delete=YES to the system trash (requires confirmation)')
+    parser.add_argument('--recursive',      action='store_true', help='Scan subfolders recursively')
     parser.add_argument('--verbose',       action='store_true', help='Show debug logging')
     args = parser.parse_args()
 
@@ -330,7 +332,7 @@ def main():
     config = load_config() if need_config else {}
 
     # ── Scan ──────────────────────────────────────────────────────────────────
-    photos = scan_folder(folder)
+    photos = scan_folder(folder, recursive=args.recursive)
     if not photos:
         print(f"No photos found in {folder}")
         sys.exit(0)
