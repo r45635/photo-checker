@@ -52,7 +52,9 @@ def status_label(found: bool | None, skipped: bool) -> str:
 def scan_folder(folder: Path) -> list[Path]:
     return sorted(
         f for f in folder.iterdir()
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+        if f.is_file()
+        and f.suffix.lower() in IMAGE_EXTENSIONS
+        and not f.name.startswith('._')   # skip macOS resource fork files
     )
 
 
@@ -324,7 +326,8 @@ def main():
         print(f"Error: not a directory: {folder}")
         sys.exit(1)
 
-    config = load_config()
+    need_config = not args.skip_google or not args.skip_onedrive
+    config = load_config() if need_config else {}
 
     # ── Scan ──────────────────────────────────────────────────────────────────
     photos = scan_folder(folder)
