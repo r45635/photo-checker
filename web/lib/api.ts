@@ -29,14 +29,6 @@ export function videoUrl(path: string): string {
   return BASE + "/api/video?path=" + encodeURIComponent(path)
 }
 
-export async function playVideo(path: string): Promise<void> {
-  await fetch(`${BASE}/api/play-video`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path }),
-  })
-}
-
 export function appleThumbnailUrl(filename: string, backupPath?: string, size?: number): string {
   let url = BASE + "/api/apple-thumbnail?filename=" + encodeURIComponent(filename) + "&size=" + (size ?? 400)
   if (backupPath) url += "&path=" + encodeURIComponent(backupPath)

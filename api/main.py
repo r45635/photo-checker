@@ -129,10 +129,6 @@ class MoveBody(BaseModel):
     slug: str
 
 
-class PlayVideoBody(BaseModel):
-    path: str
-
-
 class OpenFinderBody(BaseModel):
     path: str
 
@@ -613,21 +609,6 @@ def move_files(body: MoveBody) -> dict[str, Any]:
     _save_result_file(body.slug, remaining)
 
     return {"moved": moved, "errors": errors, "dest": str(dest)}
-
-
-# ── POST /api/play-video ─────────────────────────────────────────────────────────
-
-@app.post("/api/play-video")
-def play_video(body: PlayVideoBody) -> dict[str, str]:
-    """Open a video file in the default macOS player (QuickTime)."""
-    p = Path(body.path)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    try:
-        subprocess.Popen(["open", str(p)])
-        return {"status": "opened", "path": str(p)}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # ── POST /api/open-finder ─────────────────────────────────────────────────────────
