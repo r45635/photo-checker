@@ -161,15 +161,12 @@ export default function HomePage() {
     return m
   }, [filtered])
 
-  // ── Reset visibleCount when filters/sort change ────────────────────────────
-  const filteredKey = filtered.length + filterStatus + search + (selectedSubfolder ?? "") + sortBy + sortDesc
-  const prevFilteredKey = useRef(filteredKey)
-  if (prevFilteredKey.current !== filteredKey) {
-    prevFilteredKey.current = filteredKey
-    // Only reset if something actually changed beyond count
-    if (visibleCount !== 32) {
-      setVisibleCount(32)
-    }
+  // ── Reset visibleCount only when filter/sort params change (not on import/delete) ──
+  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc)
+  const prevFilterKey = useRef(filterKey)
+  if (prevFilterKey.current !== filterKey) {
+    prevFilterKey.current = filterKey
+    setVisibleCount(32)
   }
 
   // ── Infinite scroll ────────────────────────────────────────────────────────
@@ -229,7 +226,6 @@ export default function HomePage() {
 
   function handleView(record: PhotoRecord) {
     setDetail(record)
-    window.scrollTo({ top: 0 })
   }
 
   function handleClose() {
