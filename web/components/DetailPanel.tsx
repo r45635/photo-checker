@@ -64,7 +64,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
 
     if (record.safe_to_delete === "YES") {
       setAppleLoading(true)
-      getAppleInfo(record.filename)
+      getAppleInfo(record.filename, record.path)
         .then((info) => {
           setAppleInfo(info)
         })
@@ -213,7 +213,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                           </div>
                         ) : (
                           <img
-                            src={appleThumbnailUrl(record.filename)}
+                            src={appleThumbnailUrl(record.filename, record.path)}
                             alt={`Apple Photos: ${record.filename}`}
                             className="w-full h-full object-contain"
                             onError={() => setAppleThumbError(true)}

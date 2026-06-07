@@ -29,8 +29,9 @@ export default function HomePage() {
   const [scanOpen, setScanOpen] = useState(false)
   const [visibleCount, setVisibleCount] = useState(32)
 
-  // ── Infinite scroll sentinel ───────────────────────────────────────────────
+  // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
   const sentinelRef = useRef<HTMLDivElement>(null)
+  const lastSelectedIndex = useRef<number>(-1)
 
   // ── On mount: load result list ─────────────────────────────────────────────
   useEffect(() => {
@@ -67,15 +68,28 @@ export default function HomePage() {
       .finally(() => setLoading(false))
   }, [selectedSlug])
 
-  // ── Derived: subfolderMap ──────────────────────────────────────────────────
+  // ── Derived: pre-subfolder filtered (status + search only) ────────────────
+  const preSubfiltered = useMemo<PhotoRecord[]>(() => {
+    let list = records
+    if (filterStatus !== "ALL") {
+      list = list.filter((r) => r.safe_to_delete === filterStatus)
+    }
+    if (search.trim()) {
+      const lower = search.trim().toLowerCase()
+      list = list.filter((r) => r.filename.toLowerCase().includes(lower))
+    }
+    return list
+  }, [records, filterStatus, search])
+
+  // ── Derived: subfolderMap (counts reflect current status+search filter) ────
   const subfolderMap = useMemo<Map<string, number>>(() => {
     const m = new Map<string, number>()
-    for (const r of records) {
+    for (const r of preSubfiltered) {
       const sf = r._subfolder ?? ""
       m.set(sf, (m.get(sf) ?? 0) + 1)
     }
     return m
-  }, [records])
+  }, [preSubfiltered])
 
   // ── Derived: stats ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -105,18 +119,8 @@ export default function HomePage() {
 
   // ── Derived: filtered & sorted ─────────────────────────────────────────────
   const filtered = useMemo<PhotoRecord[]>(() => {
-    let list = records
-
-    // Filter by status
-    if (filterStatus !== "ALL") {
-      list = list.filter((r) => r.safe_to_delete === filterStatus)
-    }
-
-    // Filter by search
-    if (search.trim()) {
-      const lower = search.trim().toLowerCase()
-      list = list.filter((r) => r.filename.toLowerCase().includes(lower))
-    }
+    // Start from pre-subfolder filtered list (status + search already applied)
+    let list = preSubfiltered
 
     // Filter by subfolder
     if (selectedSubfolder !== null) {
@@ -144,10 +148,17 @@ export default function HomePage() {
     })
 
     return list
-  }, [records, filterStatus, search, selectedSubfolder, sortBy, sortDesc])
+  }, [preSubfiltered, selectedSubfolder, sortBy, sortDesc])
 
   // ── Derived: visible slice ─────────────────────────────────────────────────
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
+
+  // ── Derived: filename → index in filtered (for shift-click) ───────────────
+  const filteredIndexMap = useMemo<Map<string, number>>(() => {
+    const m = new Map<string, number>()
+    filtered.forEach((r, i) => m.set(r.filename, i))
+    return m
+  }, [filtered])
 
   // ── Reset visibleCount when filters/sort change ────────────────────────────
   const filteredKey = filtered.length + filterStatus + search + (selectedSubfolder ?? "") + sortBy + sortDesc
@@ -179,6 +190,8 @@ export default function HomePage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleSelect(filename: string) {
+    const idx = filteredIndexMap.get(filename) ?? -1
+    if (idx >= 0) lastSelectedIndex.current = idx
     setBatch((prev) => {
       const next = new Set(prev)
       if (next.has(filename)) {
@@ -186,6 +199,25 @@ export default function HomePage() {
       } else {
         next.add(filename)
       }
+      return next
+    })
+  }
+
+  function handleShiftSelect(index: number) {
+    const anchor = lastSelectedIndex.current
+    if (anchor < 0) {
+      // No previous selection — treat as regular select
+      const r = filtered[index]
+      if (r) handleSelect(r.filename)
+      return
+    }
+    const start = Math.min(anchor, index)
+    const end = Math.max(anchor, index)
+    const toAdd = filtered.slice(start, end + 1).map((r) => r.filename)
+    lastSelectedIndex.current = index
+    setBatch((prev) => {
+      const next = new Set(prev)
+      toAdd.forEach((f) => next.add(f))
       return next
     })
   }
@@ -446,8 +478,10 @@ export default function HomePage() {
                     <PhotoCard
                       key={r.filename}
                       record={r}
+                      index={filteredIndexMap.get(r.filename) ?? -1}
                       selected={batch.has(r.filename)}
                       onSelect={handleSelect}
+                      onShiftSelect={handleShiftSelect}
                       onView={handleView}
                       thumbnailUrl={thumbnailUrl(r.path)}
                     />

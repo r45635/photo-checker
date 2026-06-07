@@ -239,9 +239,9 @@ def _video_thumbnail(file_path: Path, size: int) -> bytes | None:
 # ── GET /api/apple-thumbnail ─────────────────────────────────────────────────────
 
 @app.get("/api/apple-thumbnail")
-def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400)) -> Response:
+def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400), path: str | None = Query(None)) -> Response:
     """Return a JPEG thumbnail sourced from the Apple Photos library."""
-    photo = _find_apple_photo(filename)
+    photo = _find_apple_photo(filename, backup_path=path)
     if photo is None:
         raise HTTPException(status_code=404, detail="Photo not found in Apple Photos library")
 
@@ -281,27 +281,67 @@ def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400)) -> R
     )
 
 
-def _find_apple_photo(filename: str):
-    """Return an osxphotos PhotoInfo object matching the filename, or None."""
+_apple_cache: dict | None = None
+
+
+def _get_apple_cache() -> dict | None:
+    """Lazy-load and cache the PhotosDB name+fingerprint indexes."""
+    global _apple_cache
+    if _apple_cache is not None:
+        return _apple_cache
     try:
         import osxphotos
         db = osxphotos.PhotosDB()
-        needle = filename.lower()
-        for photo in db.photos():
-            if photo.original_filename.lower() == needle:
-                return photo
-        return None
+        photos = db.photos()
+        names: dict = {}
+        fingerprints: dict = {}
+        for p in photos:
+            key = p.original_filename.lower()
+            if key not in names:
+                names[key] = p
+            if p.fingerprint:
+                fingerprints[p.fingerprint] = p
+        _apple_cache = {"names": names, "fingerprints": fingerprints}
+        return _apple_cache
     except Exception as exc:
-        print(f"[apple] lookup error for {filename}: {exc}", file=sys.stderr)
+        print(f"[apple] cache build error: {exc}", file=sys.stderr)
         return None
+
+
+def _file_sha1(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha1()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _find_apple_photo(filename: str, backup_path: str | None = None):
+    """Return an osxphotos PhotoInfo matching by filename, then SHA1 fingerprint."""
+    cache = _get_apple_cache()
+    if cache is None:
+        return None
+    photo = cache["names"].get(filename.lower())
+    if photo is not None:
+        return photo
+    if backup_path:
+        try:
+            p = Path(backup_path)
+            if p.is_file():
+                sha1 = _file_sha1(p)
+                return cache["fingerprints"].get(sha1)
+        except Exception as exc:
+            print(f"[apple] fingerprint lookup error for {filename}: {exc}", file=sys.stderr)
+    return None
 
 
 # ── GET /api/apple-info ──────────────────────────────────────────────────────────
 
 @app.get("/api/apple-info")
-def get_apple_info(filename: str = Query(...)) -> dict[str, Any] | None:
+def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -> dict[str, Any] | None:
     """Return Apple Photos metadata for a filename, or null if not found."""
-    photo = _find_apple_photo(filename)
+    photo = _find_apple_photo(filename, backup_path=path)
     if photo is None:
         return None
     try:

@@ -88,14 +88,17 @@ def init_config():
 
 # ── Apple Photos ───────────────────────────────────────────────────────────────
 
-def load_apple_photos_filenames() -> set | None:
+def load_apple_photos_filenames() -> tuple[set, set] | None:
+    """Return (name_set, fingerprint_set) or None on failure."""
     try:
         import osxphotos
         print("Loading Apple Photos library (may take a moment for large libraries)...")
         db = osxphotos.PhotosDB()
-        names = {p.original_filename.lower() for p in db.photos()}
-        print(f"  Apple Photos: {len(names):,} items indexed.")
-        return names
+        photos = db.photos()
+        names = {p.original_filename.lower() for p in photos}
+        fingerprints = {p.fingerprint for p in photos if p.fingerprint}
+        print(f"  Apple Photos: {len(names):,} items indexed ({len(fingerprints):,} with fingerprints).")
+        return names, fingerprints
     except ImportError:
         print("  WARNING: osxphotos not installed — skipping Apple Photos. Run: pip install osxphotos")
         return None
@@ -104,10 +107,27 @@ def load_apple_photos_filenames() -> set | None:
         return None
 
 
-def check_apple(filename: str, index: set | None) -> bool | None:
-    if index is None:
+def _file_sha1(filepath: Path) -> str:
+    import hashlib
+    h = hashlib.sha1()
+    with filepath.open('rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_apple(filename: str, name_idx: set | None, fp_idx: set | None = None, filepath: Path | None = None) -> bool | None:
+    if name_idx is None:
         return None
-    return filename.lower() in index
+    if filename.lower() in name_idx:
+        return True
+    # Secondary: SHA1 fingerprint check catches renamed imports (~10% false negatives)
+    if fp_idx and filepath and filepath.is_file():
+        try:
+            return _file_sha1(filepath) in fp_idx
+        except Exception:
+            pass
+    return False
 
 # ── Google Photos ──────────────────────────────────────────────────────────────
 
@@ -339,7 +359,9 @@ def main():
     print(f"\nFound {len(photos):,} photos in {folder}\n")
 
     # ── Build indexes ─────────────────────────────────────────────────────────
-    apple_idx  = None if args.skip_apple  else load_apple_photos_filenames()
+    apple_result = None if args.skip_apple else load_apple_photos_filenames()
+    apple_names: set | None = apple_result[0] if apple_result else None
+    apple_fps:   set | None = apple_result[1] if apple_result else None
     google_idx = None if args.skip_google else load_google_filenames(config, args.refresh_cache)
 
     print()
@@ -347,7 +369,7 @@ def main():
     # ── Process each photo ────────────────────────────────────────────────────
     results = []
     for i, photo in enumerate(photos, 1):
-        apple    = check_apple(photo.name, apple_idx)   if not args.skip_apple  else None
+        apple    = check_apple(photo.name, apple_names, apple_fps, photo) if not args.skip_apple  else None
         google   = check_google(photo.name, google_idx) if not args.skip_google else None
         onedrive = check_onedrive(photo.name, config)   if not args.skip_onedrive else None
 

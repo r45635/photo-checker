@@ -381,12 +381,12 @@ export default function Sidebar({
             >
               <Folder size={13} className="shrink-0" />
               <span className="flex-1 text-xs">All folders</span>
-              {stats.total > 0 && (
+              {subfolders.size > 0 && (
                 <span
                   className="rounded px-1 text-xs"
                   style={{ background: "#1a2840", color: "#4a6080" }}
                 >
-                  {stats.total}
+                  {Array.from(subfolders.values()).reduce((a, b) => a + b, 0)}
                 </span>
               )}
             </button>

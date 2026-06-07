@@ -7,8 +7,10 @@ import type { PhotoRecord } from "@/lib/types"
 
 export interface PhotoCardProps {
   record: PhotoRecord
+  index: number
   selected: boolean
   onSelect: (filename: string) => void
+  onShiftSelect: (index: number) => void
   onView: (record: PhotoRecord) => void
   thumbnailUrl: string
 }
@@ -32,8 +34,10 @@ function formatMB(sizeKb: number): string {
 
 export default function PhotoCard({
   record,
+  index,
   selected,
   onSelect,
+  onShiftSelect,
   onView,
   thumbnailUrl,
 }: PhotoCardProps) {
@@ -95,7 +99,11 @@ export default function PhotoCard({
             )}
             onClick={(e) => {
               e.stopPropagation()
-              onSelect(record.filename)
+              if (e.shiftKey) {
+                onShiftSelect(index)
+              } else {
+                onSelect(record.filename)
+              }
             }}
             aria-label={selected ? "Deselect" : "Select"}
           >

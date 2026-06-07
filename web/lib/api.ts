@@ -25,12 +25,16 @@ export function thumbnailUrl(path: string, size?: number): string {
   return BASE + "/api/thumbnail?path=" + encodeURIComponent(path) + "&size=" + (size ?? 400)
 }
 
-export function appleThumbnailUrl(filename: string, size?: number): string {
-  return BASE + "/api/apple-thumbnail?filename=" + encodeURIComponent(filename) + "&size=" + (size ?? 400)
+export function appleThumbnailUrl(filename: string, backupPath?: string, size?: number): string {
+  let url = BASE + "/api/apple-thumbnail?filename=" + encodeURIComponent(filename) + "&size=" + (size ?? 400)
+  if (backupPath) url += "&path=" + encodeURIComponent(backupPath)
+  return url
 }
 
-export async function getAppleInfo(filename: string): Promise<ApplePhotoInfo | null> {
-  const res = await fetch(`${BASE}/api/apple-info?filename=${encodeURIComponent(filename)}`)
+export async function getAppleInfo(filename: string, backupPath?: string): Promise<ApplePhotoInfo | null> {
+  let url = `${BASE}/api/apple-info?filename=${encodeURIComponent(filename)}`
+  if (backupPath) url += "&path=" + encodeURIComponent(backupPath)
+  const res = await fetch(url)
   if (res.status === 404) return null
   await throwIfNotOk(res)
   return res.json()
