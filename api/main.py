@@ -13,8 +13,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any
+
+
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -377,7 +382,7 @@ def _get_apple_cache() -> dict | None:
         names: dict = {}
         fingerprints: dict = {}
         for p in photos:
-            key = p.original_filename.lower()
+            key = _nfc(p.original_filename).lower()
             if key not in names:
                 names[key] = p
             if p.fingerprint:
@@ -403,7 +408,7 @@ def _find_apple_photo(filename: str, backup_path: str | None = None):
     cache = _get_apple_cache()
     if cache is None:
         return None
-    photo = cache["names"].get(filename.lower())
+    photo = cache["names"].get(_nfc(filename).lower())
     if photo is not None:
         return photo
     if backup_path:

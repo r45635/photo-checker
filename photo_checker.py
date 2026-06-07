@@ -88,14 +88,24 @@ def init_config():
 
 # ── Apple Photos ───────────────────────────────────────────────────────────────
 
+def _nfc(s: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFC", s)
+
+
 def load_apple_photos_filenames() -> tuple[set, set] | None:
-    """Return (name_set, fingerprint_set) or None on failure."""
+    """Return (name_set, fingerprint_set) or None on failure.
+
+    Apple Photos stores original_filename in NFC; macOS filesystem paths for
+    files on HFS+/APFS or external drives arrive in NFD via Python's pathlib.
+    We normalise everything to NFC so accented filenames (é, ü, ñ …) match.
+    """
     try:
         import osxphotos
         print("Loading Apple Photos library (may take a moment for large libraries)...")
         db = osxphotos.PhotosDB()
         photos = db.photos()
-        names = {p.original_filename.lower() for p in photos}
+        names = {_nfc(p.original_filename).lower() for p in photos}
         fingerprints = {p.fingerprint for p in photos if p.fingerprint}
         print(f"  Apple Photos: {len(names):,} items indexed ({len(fingerprints):,} with fingerprints).")
         return names, fingerprints
@@ -119,7 +129,7 @@ def _file_sha1(filepath: Path) -> str:
 def check_apple(filename: str, name_idx: set | None, fp_idx: set | None = None, filepath: Path | None = None) -> bool | None:
     if name_idx is None:
         return None
-    if filename.lower() in name_idx:
+    if _nfc(filename).lower() in name_idx:
         return True
     # Secondary: SHA1 fingerprint check catches renamed imports (~10% false negatives)
     if fp_idx and filepath and filepath.is_file():
