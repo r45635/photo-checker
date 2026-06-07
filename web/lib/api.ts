@@ -5,7 +5,13 @@ const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text)
+    try {
+      const json = JSON.parse(text)
+      throw new Error(json.detail ?? text)
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text)
+      throw e
+    }
   }
 }
 

@@ -474,31 +474,47 @@ def scan(body: ScanBody) -> dict[str, str]:
 # ── POST /api/import ─────────────────────────────────────────────────────────────
 
 @app.post("/api/import")
-def import_to_photos(body: ImportBody) -> dict[str, str]:
-    """Import a file into Apple Photos via osascript."""
+async def import_to_photos(body: ImportBody) -> dict[str, str]:
+    """Import a file into Apple Photos via osascript.
+
+    Uses 'skip check duplicates true' so Photos never shows a blocking
+    dialog when the image is already in the library.
+    """
+    import asyncio
+
     file_path = Path(body.path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    script = f'tell application "Photos" to import POSIX file "{file_path}"'
+    # Escape double-quotes in path (edge case for filenames with quotes)
+    escaped = str(file_path).replace('"', '\\"')
+    script = (
+        f'tell application "Photos" to import '
+        f'{{POSIX file "{escaped}"}} skip check duplicates true'
+    )
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            proc.kill()
             raise HTTPException(
-                status_code=500,
-                detail=f"osascript error: {result.stderr.strip()}",
+                status_code=504,
+                detail="Photos did not respond within 60 s — make sure Photos.app is running.",
             )
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            raise HTTPException(status_code=500, detail=f"Photos import failed: {err}")
         return {"status": "imported", "path": str(file_path)}
     except HTTPException:
         raise
     except Exception as exc:
         print(f"[import] error: {exc}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Import failed — check server logs.") from exc
 
 
 # ── POST /api/patch ──────────────────────────────────────────────────────────────
