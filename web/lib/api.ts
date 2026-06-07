@@ -1,6 +1,6 @@
 import type { ApplePhotoInfo, PhotoRecord, ResultFile } from "./types"
 
-const BASE = "http://localhost:8000"
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 async function throwIfNotOk(res: Response): Promise<void> {
   if (!res.ok) {

@@ -20,13 +20,19 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ── Paths ───────────────────────────────────────────────────────────────────────
+# ── Paths (portable: works both in dev and when packaged with PyInstaller) ───────
 
-PYTHON      = Path("/Users/vcruvellier/tools/photo_checker/venv/bin/python")
-CHECKER     = Path("/Users/vcruvellier/tools/photo_checker/photo_checker.py")
-RESULTS_DIR = Path("/Users/vcruvellier/tools/photo_checker/results")
+_FROZEN = getattr(sys, "frozen", False)
+# When frozen: sys._MEIPASS is the temp bundle dir; use home for writable data.
+_BUNDLE_DIR = Path(sys._MEIPASS) if _FROZEN else Path(__file__).parent.parent  # type: ignore[attr-defined]
+_DATA_DIR   = Path.home() / ".photo_checker" if _FROZEN else _BUNDLE_DIR
+
+# photo_checker.py is imported directly (see _do_scan); these are dev-only fallbacks.
+RESULTS_DIR = _DATA_DIR / "results"
+STATIC_DIR  = _BUNDLE_DIR / "web" / "out"
 
 # ── App ─────────────────────────────────────────────────────────────────────────
 
@@ -394,47 +400,74 @@ def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -
 
 # ── POST /api/scan ───────────────────────────────────────────────────────────────
 
+def _do_scan(folder: Path, recursive: bool) -> tuple[str, list[dict]]:
+    """Run the Apple-Photos check in-process and return (log_output, results)."""
+    # Import photo_checker from sibling directory (works in dev and when bundled)
+    _pc_dir = str(_BUNDLE_DIR)
+    if _pc_dir not in sys.path:
+        sys.path.insert(0, _pc_dir)
+
+    import io as _io
+    import contextlib
+    from photo_checker import (
+        scan_folder as _scan_folder,
+        load_apple_photos_filenames,
+        check_apple,
+        status_label,
+    )
+
+    log = _io.StringIO()
+    with contextlib.redirect_stdout(log):
+        photos = _scan_folder(folder, recursive=recursive)
+        if not photos:
+            return f"No photos found in {folder}", []
+
+        print(f"\nFound {len(photos):,} photos in {folder}\n")
+        apple_result = load_apple_photos_filenames()
+        apple_names = apple_result[0] if apple_result else None
+        apple_fps   = apple_result[1] if apple_result else None
+        print()
+
+        results = []
+        for i, photo in enumerate(photos, 1):
+            apple = check_apple(photo.name, apple_names, apple_fps, photo)
+            found_in = ["apple_photos"] if apple is True else []
+            has_error = apple is None
+            safe = bool(found_in) and not has_error
+            results.append({
+                "filename":       photo.name,
+                "path":           str(photo),
+                "size_kb":        round(photo.stat().st_size / 1024, 1),
+                "apple_photos":   status_label(apple, False),
+                "google_photos":  "skipped",
+                "onedrive":       "skipped",
+                "found_in":       ", ".join(found_in) if found_in else "—",
+                "safe_to_delete": "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
+            })
+            icon = "OK" if safe else ("?" if found_in and has_error else "NO")
+            print(f"[{i:>4}/{len(photos)}] [{icon}] {photo.name}")
+
+    return log.getvalue(), results
+
+
 @app.post("/api/scan")
 def scan(body: ScanBody) -> dict[str, str]:
-    """
-    Run photo_checker.py on the given folder and return {slug, output}.
-    Always skips Google and OneDrive (Apple-only) to avoid interactive OAuth flows.
-    """
+    """Scan a folder for photos and check against Apple Photos (in-process)."""
     folder = Path(body.folder).expanduser().resolve()
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {folder}")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     slug = folder.name
-    output_base = str(RESULTS_DIR / slug)
-
-    cmd = [
-        str(PYTHON),
-        str(CHECKER),
-        str(folder),
-        "--output", output_base,
-        "--skip-google",
-        "--skip-onedrive",
-    ]
-    if body.recursive:
-        cmd.append("--recursive")
 
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        combined = proc.stdout + ("\n" + proc.stderr if proc.stderr else "")
-        if proc.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Scan failed (exit {proc.returncode}):\n{combined}",
-            )
-        return {"slug": _slug_from_stem(slug), "output": combined}
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Scan timed out after 5 minutes")
+        log, results = _do_scan(folder, body.recursive)
+        if not results:
+            raise HTTPException(status_code=400, detail=f"No photos found in {folder}")
+
+        json_path = RESULTS_DIR / f"{slug}.json"
+        json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        return {"slug": _slug_from_stem(slug), "output": log}
     except HTTPException:
         raise
     except Exception as exc:
@@ -662,7 +695,21 @@ def pick_folder() -> dict[str, str]:
         return {"path": ""}
 
 
+# ── Static frontend (served when web/out/ exists — production bundle) ────────────
+
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
 # ── Entry point ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import threading, webbrowser, time as _time
+
+    def _open_browser():
+        _time.sleep(1.5)
+        webbrowser.open("http://localhost:8000")
+
+    if STATIC_DIR.exists():
+        # Production mode: serve everything from port 8000, open browser
+        threading.Thread(target=_open_browser, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=8000)
