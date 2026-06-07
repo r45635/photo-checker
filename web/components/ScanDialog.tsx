@@ -10,7 +10,7 @@ interface ScanDialogProps {
   onScanned: (slug: string) => void
 }
 
-const BASE = "http://localhost:8000"
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps) {
   const [folderPath, setFolderPath] = useState("")
@@ -72,17 +72,16 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       const res = await fetch(`${BASE}/api/pick-folder`)
       if (res.ok) {
         const data = await res.json()
-        if (data.path) setFolderPath(data.path)
-      } else {
-        fallbackPrompt()
+        if (data.path) {
+          setFolderPath(data.path)
+          return
+        }
       }
     } catch {
-      fallbackPrompt()
+      // fall through to prompt
     }
-  }
-
-  function fallbackPrompt() {
-    const path = window.prompt("Enter folder path:")
+    // Native dialog unavailable or cancelled — fall back to text prompt
+    const path = window.prompt("Folder path:")
     if (path) setFolderPath(path.trim())
   }
 
@@ -121,7 +120,7 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[100] flex items-center justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
       onClick={handleBackdropClick}
     >
