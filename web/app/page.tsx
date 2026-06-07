@@ -7,7 +7,7 @@ import PhotoCard from "@/components/PhotoCard"
 import DetailPanel from "@/components/DetailPanel"
 import BatchBar from "@/components/BatchBar"
 import ScanDialog from "@/components/ScanDialog"
-import { listResults, getResults, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
+import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
 import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
 
 export default function HomePage() {
@@ -290,35 +290,17 @@ export default function HomePage() {
     }
   }
 
-  async function handleOpenFinder() {
-    if (!selectedSlug) return
-    const current = records[0]
-    if (!current?.path) return
-    try {
-      const dir = current.path.split("/").slice(0, -1).join("/")
-      await openInFinder(dir)
-    } catch {
-      // best-effort
-    }
+  async function handleOpenFinderResult(folder: string) {
+    if (!folder) return
+    try { await openInFinder(folder) } catch { /* best-effort */ }
   }
 
-  function getFolderFromRecords(): string | null {
-    if (records.length === 0) return null
-    const r = records[0]
-    const dir = r.path.split("/").slice(0, -1).join("/")
-    const sf = r._subfolder ?? ""
-    if (!sf) return dir
-    return dir.endsWith("/" + sf) ? dir.slice(0, -(sf.length + 1)) : dir
-  }
-
-  async function handleRescan() {
-    const folder = getFolderFromRecords()
-    if (!folder || !selectedSlug) return
-    const recursive = records.some((r) => r._subfolder !== "")
+  async function handleRescanResult(slug: string, folder: string) {
+    if (!folder) return
     setRescanLoading(true)
     setError(null)
     try {
-      const result = await scanFolder(folder, recursive)
+      const result = await scanFolder(folder, true)
       const recs = await getResults(result.slug)
       const res = await listResults()
       setResults(res)
@@ -328,6 +310,25 @@ export default function HomePage() {
       setError(e instanceof Error ? e.message : "Re-scan failed")
     } finally {
       setRescanLoading(false)
+    }
+  }
+
+  async function handleDeleteResult(slug: string) {
+    try {
+      await deleteResult(slug)
+      const res = await listResults()
+      setResults(res)
+      if (slug === selectedSlug) {
+        setSelectedSlug(res[0]?.slug ?? null)
+        if (res[0]) {
+          const recs = await getResults(res[0].slug)
+          setRecords(recs)
+        } else {
+          setRecords([])
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed")
     }
   }
 
@@ -398,8 +399,9 @@ export default function HomePage() {
         selectedSubfolder={selectedSubfolder}
         onSelectSubfolder={setSelectedSubfolder}
         onScanClick={() => setScanOpen(true)}
-        onRescan={handleRescan}
-        onOpenFinder={handleOpenFinder}
+        onRescanResult={handleRescanResult}
+        onOpenFinderResult={handleOpenFinderResult}
+        onDeleteResult={handleDeleteResult}
         stats={stats}
       />
 

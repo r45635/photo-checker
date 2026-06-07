@@ -13,6 +13,13 @@ export interface PhotoRecord {
 export interface ResultFile {
   slug: string
   name: string
+  mtime: number        // Unix timestamp
+  folder: string       // root folder that was scanned
+  total: number
+  yes: number
+  no: number
+  maybe: number
+  size_yes_mb: number
 }
 
 export interface ApplePhotoInfo {

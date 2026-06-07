@@ -21,6 +21,11 @@ export async function listResults(): Promise<ResultFile[]> {
   return res.json()
 }
 
+export async function deleteResult(slug: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/results/${encodeURIComponent(slug)}`, { method: "DELETE" })
+  await throwIfNotOk(res)
+}
+
 export async function getResults(slug: string): Promise<PhotoRecord[]> {
   const res = await fetch(`${BASE}/api/results/${encodeURIComponent(slug)}`)
   await throwIfNotOk(res)

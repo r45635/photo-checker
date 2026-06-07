@@ -140,14 +140,61 @@ class OpenPhotosBody(BaseModel):
 # ── GET /api/results ─────────────────────────────────────────────────────────────
 
 @app.get("/api/results")
-def list_results() -> list[dict[str, str]]:
-    """Return [{slug, name}] for every JSON file in the results directory."""
+def list_results() -> list[dict[str, Any]]:
+    """Return result metadata for every JSON file in the results directory."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     items = []
-    for p in sorted(RESULTS_DIR.glob("*.json")):
+    for p in sorted(RESULTS_DIR.glob("*.json"), reverse=True):
         stem = p.stem
-        items.append({"slug": _slug_from_stem(stem), "name": stem})
+        mtime = p.stat().st_mtime
+        folder = ""
+        total = yes = no = maybe = 0
+        size_yes_mb = 0.0
+        try:
+            records = json.loads(p.read_text(encoding="utf-8"))
+            paths = [r["path"] for r in records if r.get("path")]
+            if paths:
+                try:
+                    common = os.path.commonpath(paths)
+                    folder = common if os.path.isdir(common) else str(Path(common).parent)
+                except (ValueError, OSError):
+                    folder = str(Path(paths[0]).parent)
+            total = len(records)
+            for r in records:
+                s = r.get("safe_to_delete", "NO")
+                if s == "YES":
+                    yes += 1
+                    size_yes_mb += r.get("size_kb", 0) / 1024
+                elif s == "MAYBE":
+                    maybe += 1
+                else:
+                    no += 1
+        except Exception:
+            pass
+        items.append({
+            "slug": _slug_from_stem(stem),
+            "name": stem,
+            "mtime": mtime,
+            "folder": folder,
+            "total": total,
+            "yes": yes,
+            "no": no,
+            "maybe": maybe,
+            "size_yes_mb": round(size_yes_mb, 1),
+        })
     return items
+
+
+# ── DELETE /api/results/{slug} ───────────────────────────────────────────────────
+
+@app.delete("/api/results/{slug}")
+def delete_result(slug: str) -> dict[str, str]:
+    """Delete a result JSON file."""
+    path = RESULTS_DIR / f"{_stem_from_slug(slug)}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Result not found: {slug}")
+    path.unlink()
+    return {"status": "deleted", "slug": slug}
 
 
 # ── GET /api/results/{slug} ──────────────────────────────────────────────────────
