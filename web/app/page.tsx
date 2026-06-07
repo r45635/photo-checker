@@ -154,10 +154,10 @@ export default function HomePage() {
   // ── Derived: visible slice ─────────────────────────────────────────────────
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
 
-  // ── Derived: filename → index in filtered (for shift-click) ───────────────
+  // ── Derived: path → index in filtered (for shift-click) ──────────────────
   const filteredIndexMap = useMemo<Map<string, number>>(() => {
     const m = new Map<string, number>()
-    filtered.forEach((r, i) => m.set(r.filename, i))
+    filtered.forEach((r, i) => m.set(r.path, i))
     return m
   }, [filtered])
 
@@ -187,15 +187,15 @@ export default function HomePage() {
   }, [visibleCount, filtered.length])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  function handleSelect(filename: string) {
-    const idx = filteredIndexMap.get(filename) ?? -1
+  function handleSelect(path: string) {
+    const idx = filteredIndexMap.get(path) ?? -1
     if (idx >= 0) lastSelectedIndex.current = idx
     setBatch((prev) => {
       const next = new Set(prev)
-      if (next.has(filename)) {
-        next.delete(filename)
+      if (next.has(path)) {
+        next.delete(path)
       } else {
-        next.add(filename)
+        next.add(path)
       }
       return next
     })
@@ -204,24 +204,23 @@ export default function HomePage() {
   function handleShiftSelect(index: number) {
     const anchor = lastSelectedIndex.current
     if (anchor < 0) {
-      // No previous selection — treat as regular select
       const r = filtered[index]
-      if (r) handleSelect(r.filename)
+      if (r) handleSelect(r.path)
       return
     }
     const start = Math.min(anchor, index)
     const end = Math.max(anchor, index)
-    const toAdd = filtered.slice(start, end + 1).map((r) => r.filename)
+    const toAdd = filtered.slice(start, end + 1).map((r) => r.path)
     lastSelectedIndex.current = index
     setBatch((prev) => {
       const next = new Set(prev)
-      toAdd.forEach((f) => next.add(f))
+      toAdd.forEach((p) => next.add(p))
       return next
     })
   }
 
   function handleSelectAll() {
-    setBatch(new Set(filtered.map((r) => r.filename)))
+    setBatch(new Set(filtered.map((r) => r.path)))
   }
 
   function handleView(record: PhotoRecord) {
@@ -232,43 +231,43 @@ export default function HomePage() {
     setDetail(null)
   }
 
-  function handleImported(filename: string) {
+  function handleImported(path: string) {
     setRecords((prev) =>
       prev.map((r) =>
-        r.filename === filename
+        r.path === path
           ? { ...r, apple_photos: "yes", safe_to_delete: "YES" }
           : r
       )
     )
     setBatch((prev) => {
       const next = new Set(prev)
-      next.delete(filename)
+      next.delete(path)
       return next
     })
   }
 
-  function handleImportedBatch(filenames: string[]) {
-    const set = new Set(filenames)
+  function handleImportedBatch(paths: string[]) {
+    const set = new Set(paths)
     setRecords((prev) =>
       prev.map((r) =>
-        set.has(r.filename)
+        set.has(r.path)
           ? { ...r, apple_photos: "yes", safe_to_delete: "YES" }
           : r
       )
     )
     setBatch((prev) => {
       const next = new Set(prev)
-      filenames.forEach((f) => next.delete(f))
+      paths.forEach((p) => next.delete(p))
       return next
     })
   }
 
-  function handleDeleted(filenames: string[]) {
-    const set = new Set(filenames)
-    setRecords((prev) => prev.filter((r) => !set.has(r.filename)))
+  function handleDeleted(paths: string[]) {
+    const set = new Set(paths)
+    setRecords((prev) => prev.filter((r) => !set.has(r.path)))
     setBatch((prev) => {
       const next = new Set(prev)
-      filenames.forEach((f) => next.delete(f))
+      paths.forEach((p) => next.delete(p))
       return next
     })
   }
@@ -527,10 +526,10 @@ export default function HomePage() {
                   const r = item.record
                   return (
                     <PhotoCard
-                      key={r.filename}
+                      key={r.path}
                       record={r}
-                      index={filteredIndexMap.get(r.filename) ?? -1}
-                      selected={batch.has(r.filename)}
+                      index={filteredIndexMap.get(r.path) ?? -1}
+                      selected={batch.has(r.path)}
                       onSelect={handleSelect}
                       onShiftSelect={handleShiftSelect}
                       onView={handleView}

@@ -9,7 +9,7 @@ export interface PhotoCardProps {
   record: PhotoRecord
   index: number
   selected: boolean
-  onSelect: (filename: string) => void
+  onSelect: (path: string) => void
   onShiftSelect: (index: number) => void
   onView: (record: PhotoRecord) => void
   thumbnailUrl: string
@@ -102,7 +102,7 @@ export default function PhotoCard({
               if (e.shiftKey) {
                 onShiftSelect(index)
               } else {
-                onSelect(record.filename)
+                onSelect(record.path)
               }
             }}
             aria-label={selected ? "Deselect" : "Select"}

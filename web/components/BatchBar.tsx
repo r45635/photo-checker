@@ -10,8 +10,8 @@ interface BatchBarProps {
   records: PhotoRecord[]
   slug: string
   onClear: () => void
-  onDeleted: (filenames: string[]) => void
-  onImported: (filenames: string[]) => void
+  onDeleted: (paths: string[]) => void
+  onImported: (paths: string[]) => void
   onSelectAll: () => void
 }
 
@@ -35,7 +35,7 @@ export default function BatchBar({
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  const batchRecords = records.filter((r) => batch.has(r.filename))
+  const batchRecords = records.filter((r) => batch.has(r.path))
 
   const totalSizeKb = batchRecords.reduce((sum, r) => sum + r.size_kb, 0)
   const totalSizeMb = (totalSizeKb / 1024).toFixed(1)
@@ -77,10 +77,9 @@ export default function BatchBar({
     setErrorMsg(null)
     try {
       const paths = canDelete.map((r) => r.path)
-      const filenames = canDelete.map((r) => r.filename)
       await deletePhotos(paths, slug)
       closeConfirm()
-      onDeleted(filenames)
+      onDeleted(paths)
     } catch (e: any) {
       setErrorMsg(e.message ?? "Delete failed")
     } finally {
@@ -93,14 +92,13 @@ export default function BatchBar({
     setErrorMsg(null)
     try {
       const paths = canForce.map((r) => r.path)
-      const filenames = canForce.map((r) => r.filename)
       if (destFolder.trim()) {
         await movePhotos(paths, destFolder.trim(), slug)
       } else {
         await deletePhotos(paths, slug)
       }
       closeConfirm()
-      onDeleted(filenames)
+      onDeleted(paths)
     } catch (e: any) {
       setErrorMsg(e.message ?? "Operation failed")
     } finally {
@@ -111,15 +109,15 @@ export default function BatchBar({
   async function executeImport() {
     setIsProcessing(true)
     setErrorMsg(null)
-    const filenames: string[] = []
+    const paths: string[] = []
     try {
       for (let i = 0; i < canImport.length; i++) {
         setConfirmState({ type: "import", step: 1, progress: i })
         await importPhoto(canImport[i].path)
-        filenames.push(canImport[i].filename)
+        paths.push(canImport[i].path)
       }
       closeConfirm()
-      onImported(filenames)
+      onImported(paths)
     } catch (e: any) {
       setErrorMsg(e.message ?? "Import failed")
     } finally {

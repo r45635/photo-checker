@@ -18,7 +18,7 @@ interface DetailPanelProps {
   record: PhotoRecord | null
   slug: string
   onClose: () => void
-  onImported: (filename: string) => void
+  onImported: (path: string) => void
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -87,7 +87,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
       await importPhoto(record.path)
       await patchRecord(slug, record.filename)
       setImportDone(true)
-      onImported(record.filename)
+      onImported(record.path)
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed")
     } finally {
