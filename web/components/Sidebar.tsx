@@ -43,9 +43,10 @@ function depthOf(path: string): number {
   return path.split("/").filter(Boolean).length - 1
 }
 
-function lastSegment(path: string): string {
+function lastSegment(path: string | undefined | null): string {
+  if (!path) return ""
   const parts = path.split("/").filter(Boolean)
-  return parts[parts.length - 1] ?? path
+  return parts[parts.length - 1] ?? ""
 }
 
 function formatDate(ts: number): string {
