@@ -11,82 +11,78 @@
 
 ---
 
-## Phase 1 — Concept validation (current focus — NO GUI yet)
+## Phase 1 — Web UI MVP (DONE)
 
-Goal: prove the full pipeline works end-to-end on real data before investing in a GUI.
+Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 
-### 1.1 — Google Photos API setup and test
+### Completed
+- [x] FastAPI backend serving scan, thumbnail, import, delete, patch endpoints
+- [x] Next.js 14 static frontend (TypeScript + Tailwind)
+- [x] Photo grid with lazy-loading thumbnails (JPEG, HEIC, video)
+- [x] Filter bar (YES / NO / MAYBE / ALL) with live counts
+- [x] Subfolder navigation sidebar
+- [x] Sort by name / date / subfolder
+- [x] Infinite scroll (32 photos per page)
+- [x] Detail panel — Apple Photos metadata (albums, date, cloud status, UUID)
+- [x] Import to Apple Photos from detail panel (async, skip duplicate dialog)
+- [x] Multi-select with checkbox and shift-click range selection
+- [x] Batch bar — Trash / Import / Force-delete with confirmation dialogs
+- [x] Scan dialog with native macOS folder picker + fallback prompt
+- [x] Results list in sidebar with per-result info modal / rescan / Finder / delete icons
+- [x] Unicode NFC normalization fix (accented filenames: é, ü, ñ)
+- [x] Batch key switched from filename → path (fixes selection bugs for same-name files in different subfolders)
+- [x] README and screenshots
+
+---
+
+## Phase 2 — API integrations
+
+### 2.1 — Google Photos
 - [ ] Create Google Cloud project, enable Photos Library API
 - [ ] Create OAuth 2.0 Desktop credentials, fill `~/.photo_checker/config.json`
-- [ ] Run first auth flow (`run_local_server`), verify token saved
-- [ ] Run full scan on the Camera folder with Google Photos enabled
-- [ ] Verify cache written to `~/.photo_checker/cache/google_filenames.json`
-- [ ] Re-run and confirm cache is used (fast, no API calls)
-- [ ] Run `--refresh-cache` and confirm re-fetch
+- [ ] Run first auth flow, verify token saved
+- [ ] Full scan with Google Photos enabled, verify cache written
+- [ ] UI toggle to enable/disable Google Photos check
 
-### 1.2 — OneDrive API setup and test
-- [ ] Register app in Azure portal (App registrations), add `Files.Read` delegated scope
-- [ ] Enable public client / native flows
-- [ ] Fill `client_id` in `~/.photo_checker/config.json`
-- [ ] Run first auth (device flow — follow printed URL+code), verify token cached
-- [ ] Run scan on Camera folder with OneDrive enabled
-- [ ] Verify per-file search returns correct results
+### 2.2 — OneDrive
+- [ ] Register app in Azure portal, add `Files.Read` delegated scope
+- [ ] Enable public client / native flows, fill `client_id` in config
+- [ ] Run first auth (device flow), verify token cached
+- [ ] Full scan with OneDrive enabled
+- [ ] UI toggle to enable/disable OneDrive check
 
-### 1.3 — Three-source combined run
-- [ ] Run full scan (all three sources) on Camera folder
-- [ ] Compare `safe_to_delete` results vs Apple-only run
-- [ ] Spot-check: pick 5 YES files, manually confirm they exist in each reported repo
-- [ ] Spot-check: pick 5 NO files, confirm they are genuinely absent
-
-### 1.4 — Deletion flow test
-- [ ] Create a scratch folder with 3–5 expendable copies of known-backed-up photos
-- [ ] Run with `--dry-run` — verify list matches expectations
-- [ ] Run with `--delete` — confirm files move to Trash, folder is empty
-- [ ] Verify files appear in macOS Trash and can be restored
-
-### 1.5 — Edge cases
-- [ ] Files with special characters in names (spaces, accents, apostrophes)
-- [ ] Files present in Apple Photos but renamed (should show as NO — expected behavior)
-- [ ] Very large folder (2 000+ files): measure total runtime
-- [ ] Google token expiry: let token expire, verify auto-refresh works
-- [ ] OneDrive token expiry: same
-
-### 1.6 — Accuracy assessment
-- [ ] Document false-negative rate (files that exist in repos but aren't matched)
-  - Root cause: renamed files → consider adding EXIF date+size as a secondary signal
-- [ ] Decide whether to add hash or metadata fallback before GUI phase
+### 2.3 — Combined run
+- [ ] Run all three sources on the same folder
+- [ ] Spot-check accuracy: 5 YES files confirmed, 5 NO files confirmed absent
 
 ---
 
-## Phase 2 — MVP with GUI (after Phase 1 is complete)
+## Phase 3 — Performance & accuracy
 
-Only start this phase once Phase 1 validation is signed off.
-
-### Technology choice (decide before starting)
-Options:
-- **Tkinter** — built-in, no install, basic look
-- **PyQt6 / PySide6** — native macOS feel, more complex
-- **Textual** — rich terminal UI (TUI), no windowing system needed, easiest to build
-
-Recommendation: start with **Textual** (TUI). It runs in the terminal, looks modern,
-and avoids packaging complexity. Upgrade to a real GUI only if needed.
-
-### Planned GUI features
-- [ ] Folder picker
-- [ ] Checkboxes to enable/disable each source
-- [ ] Progress bar during scan
-- [ ] Sortable results table (filename, size, found_in, safe_to_delete)
-- [ ] Select rows and delete with confirmation dialog
-- [ ] Export CSV/JSON button
-- [ ] Settings screen for API credentials
+- [ ] Large folder test: 5 000+ files, measure total runtime
+- [ ] OneDrive: consider building a filename cache (currently one API call per file)
+- [ ] Google token auto-refresh validation
+- [ ] EXIF date+size as secondary signal for renamed files (reduce false negatives)
+- [ ] Hash-based fallback for Apple Photos (already have fingerprint index — wire into scan)
 
 ---
 
-## Known limitations (track here)
+## Phase 4 — Polish
+
+- [ ] Settings screen (API credentials, cache management)
+- [ ] Progress streaming during scan (SSE or WebSocket)
+- [ ] Export filtered results as CSV
+- [ ] Dark/light mode
+- [ ] Keyboard shortcuts (j/k navigation, space to select, d to delete)
+- [ ] Packaged macOS app (PyInstaller + Next.js static bundle)
+
+---
+
+## Known limitations
 
 | Limitation | Impact | Resolution |
 |---|---|---|
-| Filename-only matching | Renamed files not detected | Consider EXIF date+size fallback (Phase 1.6) |
-| Google cache is 24 h | Stale if you upload during the day | Add `--refresh-cache` (already exists) |
-| OneDrive: one API call per file | Slow for 5 000+ files | Consider building an OneDrive filename cache too |
-| No recursive folder scan | Only top-level files checked | Add `--recursive` flag if needed |
+| Filename-only matching | Renamed files not detected | Phase 3: EXIF date+size fallback |
+| Google cache is 24 h | Stale if you upload during the day | `--refresh-cache` flag exists; add UI button |
+| OneDrive: one API call per file | Slow for 5 000+ files | Phase 3: build an OneDrive filename cache |
+| Apple Photos only (Google/OneDrive not wired to UI) | Only one source checked | Phase 2 |
