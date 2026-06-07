@@ -30,6 +30,7 @@ interface SidebarProps {
   selectedSubfolder: string | null
   onSelectSubfolder: (sf: string | null) => void
   onScanClick: () => void
+  onRescan: () => void
   onOpenFinder: () => void
   stats: { total: number; yes: number; no: number; maybe: number; yesMB: number }
 }
@@ -59,6 +60,7 @@ export default function Sidebar({
   selectedSubfolder,
   onSelectSubfolder,
   onScanClick,
+  onRescan,
   onOpenFinder,
   stats,
 }: SidebarProps) {
@@ -173,7 +175,7 @@ export default function Sidebar({
         {selectedSlug && (
           <div className="flex gap-1.5">
             <button
-              onClick={onScanClick}
+              onClick={onRescan}
               className="flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-400 transition-colors duration-150"
               style={{ border: "1px solid #1a2840" }}
               onMouseEnter={(e) => (e.currentTarget.style.color = "#e2e8f0")}

@@ -7,7 +7,7 @@ import PhotoCard from "@/components/PhotoCard"
 import DetailPanel from "@/components/DetailPanel"
 import BatchBar from "@/components/BatchBar"
 import ScanDialog from "@/components/ScanDialog"
-import { listResults, getResults, thumbnailUrl, openInFinder } from "@/lib/api"
+import { listResults, getResults, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
 import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
 
 export default function HomePage() {
@@ -27,6 +27,7 @@ export default function HomePage() {
   const [batch, setBatch] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<PhotoRecord | null>(null)
   const [scanOpen, setScanOpen] = useState(false)
+  const [rescanLoading, setRescanLoading] = useState(false)
   const [visibleCount, setVisibleCount] = useState(32)
 
   // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
@@ -305,6 +306,35 @@ export default function HomePage() {
     }
   }
 
+  function getFolderFromRecords(): string | null {
+    if (records.length === 0) return null
+    const r = records[0]
+    const dir = r.path.split("/").slice(0, -1).join("/")
+    const sf = r._subfolder ?? ""
+    if (!sf) return dir
+    return dir.endsWith("/" + sf) ? dir.slice(0, -(sf.length + 1)) : dir
+  }
+
+  async function handleRescan() {
+    const folder = getFolderFromRecords()
+    if (!folder || !selectedSlug) return
+    const recursive = records.some((r) => r._subfolder !== "")
+    setRescanLoading(true)
+    setError(null)
+    try {
+      const result = await scanFolder(folder, recursive)
+      const recs = await getResults(result.slug)
+      const res = await listResults()
+      setResults(res)
+      setSelectedSlug(result.slug)
+      setRecords(recs)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-scan failed")
+    } finally {
+      setRescanLoading(false)
+    }
+  }
+
   // ── Subfolder grouping for grid header injection ───────────────────────────
   type GridItem =
     | { type: "header"; subfolder: string; count: number }
@@ -372,6 +402,7 @@ export default function HomePage() {
         selectedSubfolder={selectedSubfolder}
         onSelectSubfolder={setSelectedSubfolder}
         onScanClick={() => setScanOpen(true)}
+        onRescan={handleRescan}
         onOpenFinder={handleOpenFinder}
         stats={stats}
       />
@@ -404,10 +435,10 @@ export default function HomePage() {
 
           {/* Right: loading / error */}
           <div className="shrink-0 flex items-center gap-2">
-            {loading && (
+            {(loading || rescanLoading) && (
               <div className="flex items-center gap-1.5" style={{ color: "#4a6080" }}>
                 <Loader2 size={14} className="animate-spin" />
-                <span className="text-xs">Loading…</span>
+                <span className="text-xs">{rescanLoading ? "Re-scanning…" : "Loading…"}</span>
               </div>
             )}
             {error && (
