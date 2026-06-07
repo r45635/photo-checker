@@ -435,10 +435,10 @@ export default function HomePage() {
 
           {/* Right: loading / error */}
           <div className="shrink-0 flex items-center gap-2">
-            {(loading || rescanLoading) && (
+            {loading && (
               <div className="flex items-center gap-1.5" style={{ color: "#4a6080" }}>
                 <Loader2 size={14} className="animate-spin" />
-                <span className="text-xs">{rescanLoading ? "Re-scanning…" : "Loading…"}</span>
+                <span className="text-xs">Loading…</span>
               </div>
             )}
             {error && (
@@ -450,12 +450,34 @@ export default function HomePage() {
         </div>
 
         {/* Grid area */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 relative">
 
           {/* Loading state */}
           {loading && (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 size={32} className="animate-spin" style={{ color: "#3b82f6" }} />
+            <div className="flex flex-col items-center justify-center h-64 gap-3">
+              <Loader2 size={36} className="animate-spin" style={{ color: "#3b82f6" }} />
+              <span className="text-sm" style={{ color: "#4a6080" }}>Loading…</span>
+            </div>
+          )}
+
+          {/* Rescan overlay */}
+          {rescanLoading && (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4"
+              style={{ background: "rgba(6,10,16,0.85)", backdropFilter: "blur(4px)" }}
+            >
+              <div
+                className="flex flex-col items-center gap-4 rounded-2xl px-10 py-8"
+                style={{ background: "#0d1625", border: "1px solid #1a2840" }}
+              >
+                <Loader2 size={40} className="animate-spin" style={{ color: "#3b82f6" }} />
+                <span className="text-sm font-medium" style={{ color: "#94a3b8" }}>
+                  Re-scanning folder…
+                </span>
+                <span className="text-xs" style={{ color: "#4a6080" }}>
+                  This may take a minute for large libraries
+                </span>
+              </div>
             </div>
           )}
 

@@ -245,28 +245,31 @@ def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400), path
     if photo is None:
         raise HTTPException(status_code=404, detail="Photo not found in Apple Photos library")
 
-    # Prefer the original file path; fall back to any derivative
+    # Prefer derivative files (pre-cached JPEG previews, much smaller/faster than originals).
+    # Fall back to the original only when no derivative is locally available.
     source_path: str | None = None
+    is_video = False
     try:
-        source_path = photo.path  # may be None if photo is only in iCloud
+        for deriv in photo.path_derivatives or []:
+            if deriv and Path(deriv).exists():
+                source_path = deriv
+                break
     except Exception:
         pass
 
-    if not source_path or not Path(source_path).exists():
-        # Try derivatives
+    if not source_path:
         try:
-            for deriv in photo.path_derivatives or []:
-                if deriv and Path(deriv).exists():
-                    source_path = deriv
-                    break
+            orig = photo.path
+            if orig and Path(orig).exists():
+                source_path = orig
+                is_video = Path(orig).suffix.lower() in VIDEO_EXTENSIONS
         except Exception:
             pass
 
-    if not source_path or not Path(source_path).exists():
+    if not source_path:
         raise HTTPException(status_code=404, detail="No local copy available for this photo")
 
-    ext = Path(source_path).suffix.lower()
-    if ext in VIDEO_EXTENSIONS:
+    if is_video:
         jpeg_bytes = _video_thumbnail(Path(source_path), size)
     else:
         jpeg_bytes = _image_thumbnail(Path(source_path), size)
