@@ -1,16 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon } from "lucide-react"
+import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon, Play } from "lucide-react"
 import type { PhotoRecord, ApplePhotoInfo } from "@/lib/types"
 import {
   thumbnailUrl,
-  videoUrl,
   appleThumbnailUrl,
   getAppleInfo,
   importPhoto,
   patchRecord,
   openInPhotos,
+  playVideo,
 } from "@/lib/api"
 
 interface DetailPanelProps {
@@ -158,18 +158,33 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                   Backup copy
                 </p>
                 <div className="rounded-xl overflow-hidden bg-[#080e1a] aspect-video flex items-center justify-center">
-                  {thumbError ? (
+                  {isVideo(record.path) ? (
+                    // Video: show thumbnail frame, play in QuickTime on click
+                    <div className="relative w-full h-full group/vid cursor-pointer" onClick={() => playVideo(record.path)}>
+                      {thumbError ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-[#4a6080]">
+                          <ImageIcon size={32} />
+                          <span className="text-xs">Preview unavailable</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={thumbnailUrl(record.path)}
+                          alt={record.filename}
+                          className="w-full h-full object-contain"
+                          onError={() => setThumbError(true)}
+                        />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/vid:opacity-100 transition-opacity duration-150">
+                        <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                          <Play size={24} className="text-white ml-1" fill="white" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : thumbError ? (
                     <div className="flex flex-col items-center gap-2 text-[#4a6080]">
                       <ImageIcon size={32} />
                       <span className="text-xs">Preview unavailable</span>
                     </div>
-                  ) : isVideo(record.path) ? (
-                    <video
-                      src={videoUrl(record.path)}
-                      controls
-                      className="w-full h-full object-contain"
-                      onError={() => setThumbError(true)}
-                    />
                   ) : (
                     <img
                       src={thumbnailUrl(record.path)}
