@@ -19,7 +19,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 # ── Paths ───────────────────────────────────────────────────────────────────────
@@ -234,6 +234,30 @@ def _video_thumbnail(file_path: Path, size: int) -> bytes | None:
     except Exception as exc:
         print(f"[thumbnail] video error for {file_path}: {exc}", file=sys.stderr)
         return None
+
+
+# ── GET /api/video ───────────────────────────────────────────────────────────────
+
+VIDEO_MIME: dict[str, str] = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+}
+
+
+@app.get("/api/video")
+def stream_video(path: str = Query(...)) -> FileResponse:
+    """Stream a video file directly so the browser can play it."""
+    file_path = Path(path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    ext = file_path.suffix.lower()
+    media_type = VIDEO_MIME.get(ext, "video/mp4")
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        headers={"Accept-Ranges": "bytes"},
+    )
 
 
 # ── GET /api/apple-thumbnail ─────────────────────────────────────────────────────

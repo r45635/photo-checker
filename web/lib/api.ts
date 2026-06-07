@@ -25,6 +25,10 @@ export function thumbnailUrl(path: string, size?: number): string {
   return BASE + "/api/thumbnail?path=" + encodeURIComponent(path) + "&size=" + (size ?? 400)
 }
 
+export function videoUrl(path: string): string {
+  return BASE + "/api/video?path=" + encodeURIComponent(path)
+}
+
 export function appleThumbnailUrl(filename: string, backupPath?: string, size?: number): string {
   let url = BASE + "/api/apple-thumbnail?filename=" + encodeURIComponent(filename) + "&size=" + (size ?? 400)
   if (backupPath) url += "&path=" + encodeURIComponent(backupPath)

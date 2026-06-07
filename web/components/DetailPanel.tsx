@@ -5,6 +5,7 @@ import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as
 import type { PhotoRecord, ApplePhotoInfo } from "@/lib/types"
 import {
   thumbnailUrl,
+  videoUrl,
   appleThumbnailUrl,
   getAppleInfo,
   importPhoto,
@@ -164,7 +165,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                     </div>
                   ) : isVideo(record.path) ? (
                     <video
-                      src={thumbnailUrl(record.path)}
+                      src={videoUrl(record.path)}
                       controls
                       className="w-full h-full object-contain"
                       onError={() => setThumbError(true)}
