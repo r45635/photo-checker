@@ -109,20 +109,24 @@ export default function BatchBar({
   async function executeImport() {
     setIsProcessing(true)
     setErrorMsg(null)
-    const paths: string[] = []
-    try {
-      for (let i = 0; i < canImport.length; i++) {
-        setConfirmState({ type: "import", step: 1, progress: i })
+    const succeeded: string[] = []
+    const failed: string[] = []
+    for (let i = 0; i < canImport.length; i++) {
+      setConfirmState({ type: "import", step: 1, progress: i })
+      try {
         await importPhoto(canImport[i].path)
-        paths.push(canImport[i].path)
+        succeeded.push(canImport[i].path)
+      } catch {
+        failed.push(canImport[i].filename)
       }
-      closeConfirm()
-      onImported(paths)
-    } catch (e: any) {
-      setErrorMsg(e.message ?? "Import failed")
-    } finally {
-      setIsProcessing(false)
     }
+    setIsProcessing(false)
+    if (failed.length > 0) {
+      setErrorMsg(`${failed.length} import(s) failed: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? ` … +${failed.length - 3}` : ""}`)
+    } else {
+      closeConfirm()
+    }
+    if (succeeded.length > 0) onImported(succeeded)
   }
 
   return (

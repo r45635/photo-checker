@@ -12,3 +12,7 @@ photo_check_results.json
 *.json
 
 # credentials and cache live in ~/.photo_checker/ — never committed
+
+# build artifacts
+build/
+dist/

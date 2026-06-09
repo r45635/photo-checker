@@ -9,6 +9,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import csv
@@ -93,48 +94,110 @@ def _nfc(s: str) -> str:
     return unicodedata.normalize("NFC", s)
 
 
-def load_apple_photos_filenames() -> tuple[set, set] | None:
-    """Return (name_set, fingerprint_set) or None on failure.
+_COPY_SUFFIX_RE = re.compile(
+    r'(\s*-\s*copy|\s+copy|_copy)+$',
+    re.IGNORECASE,
+)
 
-    Apple Photos stores original_filename in NFC; macOS filesystem paths for
-    files on HFS+/APFS or external drives arrive in NFD via Python's pathlib.
-    We normalise everything to NFC so accented filenames (é, ü, ñ …) match.
-    """
-    try:
-        import osxphotos
-        print("Loading Apple Photos library (may take a moment for large libraries)...")
-        db = osxphotos.PhotosDB()
-        photos = db.photos()
-        names = {_nfc(p.original_filename).lower() for p in photos}
-        fingerprints = {p.fingerprint for p in photos if p.fingerprint}
-        print(f"  Apple Photos: {len(names):,} items indexed ({len(fingerprints):,} with fingerprints).")
-        return names, fingerprints
-    except ImportError:
-        print("  WARNING: osxphotos not installed — skipping Apple Photos. Run: pip install osxphotos")
-        return None
-    except Exception as e:
-        print(f"  WARNING: Apple Photos error ({e}) — skipping.")
-        return None
+def _strip_copy_suffix(stem: str) -> str:
+    """Remove trailing copy markers: ' - Copy', ' (2)', '_copy', etc."""
+    return _COPY_SUFFIX_RE.sub('', stem)
 
 
-def _file_sha1(filepath: Path) -> str:
+def _photos_library_path() -> Path | None:
+    """Find the default Photos library path."""
+    candidates = [
+        Path.home() / "Pictures" / "Photos Library.photoslibrary",
+    ]
+    for c in candidates:
+        db = c / "database" / "Photos.sqlite"
+        if db.exists():
+            return db
+    return None
+
+
+def _file_sha1(path: Path) -> str:
     import hashlib
     h = hashlib.sha1()
-    with filepath.open('rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
-def check_apple(filename: str, name_idx: set | None, fp_idx: set | None = None, filepath: Path | None = None) -> bool | None:
+def load_apple_photos_filenames() -> tuple[set, dict] | None:
+    """Return (name_set, size_index) or None on failure.
+
+    name_set  : lowercased NFC filenames from ZORIGINALFILENAME
+    size_index: {file_size_bytes: [(uuid, extension), ...]} for SHA1 fallback
+
+    Reads Photos.sqlite directly (WAL included) — osxphotos misses recent
+    imports because Photos.app keeps WAL changes in memory."""
+    import sqlite3
+
+    db_path = _photos_library_path()
+    if db_path is None:
+        print("Apple Photos library not found.")
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur = con.cursor()
+        cur.execute("""
+            SELECT aa.ZORIGINALFILENAME,
+                   aa.ZORIGINALFILESIZE,
+                   a.ZUUID,
+                   a.ZFILENAME
+            FROM   ZASSET a
+            JOIN   ZADDITIONALASSETATTRIBUTES aa ON aa.ZASSET = a.Z_PK
+            WHERE  a.ZTRASHEDSTATE = 0
+              AND  aa.ZORIGINALFILENAME IS NOT NULL
+        """)
+        names: set = set()
+        size_index: dict = {}
+        for orig_fn, size, uuid, zfilename in cur.fetchall():
+            names.add(_nfc(orig_fn).lower())
+            if size and uuid and zfilename:
+                ext = Path(zfilename).suffix  # e.g. ".jpeg"
+                size_index.setdefault(int(size), []).append((uuid, ext))
+        con.close()
+        logging.info(f"Apple Photos: {len(names)} filenames, {len(size_index)} sizes loaded")
+        return names, size_index
+    except Exception as e:
+        print(f"Apple Photos error: {e}")
+        return None
+
+
+def check_apple(filename: str, name_idx: set | None,
+                size_idx: dict | None = None,
+                filepath: Path | None = None) -> bool | None:
     if name_idx is None:
         return None
+    p = Path(filename)
+    # 1. Exact name match
     if _nfc(filename).lower() in name_idx:
         return True
-    # Secondary: SHA1 fingerprint check catches renamed imports (~10% false negatives)
-    if fp_idx and filepath and filepath.is_file():
+    # 2. Backup has " - Copy" → Apple Photos stripped it
+    stem_stripped = _strip_copy_suffix(p.stem)
+    if stem_stripped != p.stem:
+        if _nfc(stem_stripped + p.suffix).lower() in name_idx:
+            return True
+    # 3. Backup has no " - Copy" → Apple Photos added it on import
+    if _nfc(p.stem + " - Copy" + p.suffix).lower() in name_idx:
+        return True
+    # 4. SHA1 fallback: match by file size then content
+    if size_idx and filepath and filepath.is_file():
         try:
-            return _file_sha1(filepath) in fp_idx
+            size = filepath.stat().st_size
+            candidates = size_idx.get(size, [])
+            if candidates:
+                backup_sha1 = _file_sha1(filepath)
+                lib_root = _photos_library_path()
+                if lib_root:
+                    originals = lib_root.parent.parent / "originals"
+                    for uuid, ext in candidates:
+                        lib_file = originals / uuid[0] / f"{uuid}{ext}"
+                        if lib_file.exists() and _file_sha1(lib_file) == backup_sha1:
+                            return True
         except Exception:
             pass
     return False
@@ -369,9 +432,9 @@ def main():
     print(f"\nFound {len(photos):,} photos in {folder}\n")
 
     # ── Build indexes ─────────────────────────────────────────────────────────
-    apple_result = None if args.skip_apple else load_apple_photos_filenames()
-    apple_names: set | None = apple_result[0] if apple_result else None
-    apple_fps:   set | None = apple_result[1] if apple_result else None
+    apple_result  = load_apple_photos_filenames() if not args.skip_apple else None
+    apple_names: set | None  = apple_result[0] if apple_result else None
+    apple_sizes: dict | None = apple_result[1] if apple_result else None
     google_idx = None if args.skip_google else load_google_filenames(config, args.refresh_cache)
 
     print()
@@ -379,7 +442,7 @@ def main():
     # ── Process each photo ────────────────────────────────────────────────────
     results = []
     for i, photo in enumerate(photos, 1):
-        apple    = check_apple(photo.name, apple_names, apple_fps, photo) if not args.skip_apple  else None
+        apple    = check_apple(photo.name, apple_names, apple_sizes, photo) if not args.skip_apple else None
         google   = check_google(photo.name, google_idx) if not args.skip_google else None
         onedrive = check_onedrive(photo.name, config)   if not args.skip_onedrive else None
 

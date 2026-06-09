@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,15 @@ from typing import Any
 
 def _nfc(s: str) -> str:
     return unicodedata.normalize("NFC", s)
+
+
+_COPY_SUFFIX_RE = re.compile(
+    r'(\s*-\s*copy|\s+copy|_copy)+$',
+    re.IGNORECASE,
+)
+
+def _strip_copy_suffix(stem: str) -> str:
+    return _COPY_SUFFIX_RE.sub('', stem)
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -411,6 +421,16 @@ def _find_apple_photo(filename: str, backup_path: str | None = None):
     photo = cache["names"].get(_nfc(filename).lower())
     if photo is not None:
         return photo
+    p = Path(filename)
+    stem_stripped = _strip_copy_suffix(p.stem)
+    if stem_stripped != p.stem:
+        photo = cache["names"].get(_nfc(stem_stripped + p.suffix).lower())
+        if photo is not None:
+            return photo
+    copy_alt = _nfc(p.stem + " - Copy" + p.suffix).lower()
+    photo = cache["names"].get(copy_alt)
+    if photo is not None:
+        return photo
     if backup_path:
         try:
             p = Path(backup_path)
@@ -471,14 +491,14 @@ def _do_scan(folder: Path, recursive: bool) -> tuple[str, list[dict]]:
             return f"No photos found in {folder}", []
 
         print(f"\nFound {len(photos):,} photos in {folder}\n")
-        apple_result = load_apple_photos_filenames()
-        apple_names = apple_result[0] if apple_result else None
-        apple_fps   = apple_result[1] if apple_result else None
+        apple_result  = load_apple_photos_filenames()
+        apple_names   = apple_result[0] if apple_result else None
+        apple_sizes   = apple_result[1] if apple_result else None
         print()
 
         results = []
         for i, photo in enumerate(photos, 1):
-            apple = check_apple(photo.name, apple_names, apple_fps, photo)
+            apple = check_apple(photo.name, apple_names, apple_sizes, photo)
             found_in = ["apple_photos"] if apple is True else []
             has_error = apple is None
             safe = bool(found_in) and not has_error
@@ -561,7 +581,19 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
         if proc.returncode != 0:
             err = stderr.decode().strip()
             raise HTTPException(status_code=500, detail=f"Photos import failed: {err}")
-        return {"status": "imported", "path": str(file_path)}
+        result = stdout.decode().strip()
+        if not result:
+            # osascript exited 0 but Photos returned nothing — silent skip
+            # (can happen with special chars in path, permissions, or Photos busy)
+            warn = stderr.decode().strip()
+            print(f"[import] silent skip: {file_path}  stderr={warn!r}", file=sys.stderr)
+            raise HTTPException(
+                status_code=422,
+                detail=f"Photos accepted the command but did not import the file. stderr={warn!r}",
+            )
+        global _apple_cache
+        _apple_cache = None  # invalidate so next scan sees the new photo
+        return {"status": "imported", "path": str(file_path), "result": result}
     except HTTPException:
         raise
     except Exception as exc:
