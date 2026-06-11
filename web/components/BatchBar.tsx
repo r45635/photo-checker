@@ -3,23 +3,23 @@
 import { useState } from "react"
 import { X, Upload, Trash2, AlertTriangle, CheckSquare } from "lucide-react"
 import type { PhotoRecord } from "@/lib/types"
-import { deletePhotos, movePhotos, importPhoto } from "@/lib/api"
+import { deletePhotos, movePhotos, importPhoto, pickFolder } from "@/lib/api"
 
 interface BatchBarProps {
   batch: Set<string>
   records: PhotoRecord[]
   slug: string
   onClear: () => void
-  onDeleted: (paths: string[]) => void
+  onDeleted: (paths: string[], message: string) => void
   onImported: (paths: string[]) => void
   onSelectAll: () => void
 }
 
 type ConfirmState =
   | null
-  | { type: "trash"; step: 1 }
+  | { type: "trash"; step: 1; progress: number | null }
   | { type: "force"; step: 1; destFolder: string }
-  | { type: "force"; step: 2; destFolder: string; typedText: string }
+  | { type: "force"; step: 2; destFolder: string; typedText: string; progress: number | null }
   | { type: "import"; step: 1; progress: number | null }
 
 export default function BatchBar({
@@ -54,7 +54,7 @@ export default function BatchBar({
 
   function handleTrashClick() {
     setErrorMsg(null)
-    setConfirmState({ type: "trash", step: 1 })
+    setConfirmState({ type: "trash", step: 1, progress: null })
   }
 
   function handleForceClick() {
@@ -75,11 +75,14 @@ export default function BatchBar({
   async function executeTrash() {
     setIsProcessing(true)
     setErrorMsg(null)
+    const paths = canDelete.map((r) => r.path)
     try {
-      const paths = canDelete.map((r) => r.path)
-      await deletePhotos(paths, slug)
+      for (let i = 0; i < paths.length; i++) {
+        setConfirmState({ type: "trash", step: 1, progress: i })
+        await deletePhotos([paths[i]], slug)
+      }
       closeConfirm()
-      onDeleted(paths)
+      onDeleted(paths, `${paths.length} file${paths.length !== 1 ? "s" : ""} moved to Trash`)
     } catch (e: any) {
       setErrorMsg(e.message ?? "Delete failed")
     } finally {
@@ -90,15 +93,20 @@ export default function BatchBar({
   async function executeForce(destFolder: string) {
     setIsProcessing(true)
     setErrorMsg(null)
+    const paths = canForce.map((r) => r.path)
+    const isMove = !!destFolder.trim()
     try {
-      const paths = canForce.map((r) => r.path)
-      if (destFolder.trim()) {
-        await movePhotos(paths, destFolder.trim(), slug)
-      } else {
-        await deletePhotos(paths, slug)
+      for (let i = 0; i < paths.length; i++) {
+        setConfirmState({ type: "force", step: 2, destFolder, typedText: "DELETE", progress: i })
+        if (isMove) {
+          await movePhotos([paths[i]], destFolder.trim(), slug)
+        } else {
+          await deletePhotos([paths[i]], slug)
+        }
       }
       closeConfirm()
-      onDeleted(paths)
+      const verb = isMove ? "moved" : "moved to Trash"
+      onDeleted(paths, `${paths.length} file${paths.length !== 1 ? "s" : ""} ${verb}`)
     } catch (e: any) {
       setErrorMsg(e.message ?? "Operation failed")
     } finally {
@@ -148,6 +156,20 @@ export default function BatchBar({
                   Recoverable from macOS Trash.
                 </p>
                 <FilenameList records={canDelete} />
+                {confirmState.progress !== null && (
+                  <div className="mt-4">
+                    <div className="mb-1 flex justify-between text-xs text-[#4a6080]">
+                      <span>Moving…</span>
+                      <span>{confirmState.progress + 1} / {canDelete.length}</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1a2840]">
+                      <div
+                        className="h-full rounded-full bg-rose-500 transition-all duration-200"
+                        style={{ width: `${Math.round(((confirmState.progress + 1) / canDelete.length) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {errorMsg && (
                   <p className="mt-3 text-xs text-rose-400">{errorMsg}</p>
                 )}
@@ -197,8 +219,8 @@ export default function BatchBar({
                       className="flex-1 rounded-lg border border-[#1a2840] bg-[#060a10] px-3 py-2 text-sm text-slate-300 placeholder-[#4a6080] outline-none focus:border-[#3b82f6] transition-colors duration-150"
                     />
                     <button
-                      onClick={() => {
-                        const p = window.prompt("Enter destination folder path:")
+                      onClick={async () => {
+                        const p = await pickFolder()
                         if (p) setConfirmState({ ...confirmState, destFolder: p })
                       }}
                       className="rounded-lg border border-[#1a2840] px-3 py-2 text-xs text-slate-400 transition-colors duration-150 hover:border-[#2a3850] hover:text-slate-300"
@@ -224,6 +246,7 @@ export default function BatchBar({
                         step: 2,
                         destFolder: confirmState.destFolder,
                         typedText: "",
+                        progress: null,
                       })
                     }
                     className="rounded-lg border border-rose-500/50 px-4 py-2 text-sm font-medium text-rose-400 transition-colors duration-150 hover:border-rose-500 hover:text-rose-300"
@@ -243,7 +266,7 @@ export default function BatchBar({
                 </div>
                 <p className="mb-4 text-xs text-[#4a6080]">
                   Type{" "}
-                  <span className="font-mono font-bold text-rose-400">SUPPRIMER</span> to
+                  <span className="font-mono font-bold text-rose-400">DELETE</span> to
                   confirm deletion of {canForce.length} file(s).
                 </p>
                 <input
@@ -252,10 +275,24 @@ export default function BatchBar({
                   onChange={(e) =>
                     setConfirmState({ ...confirmState, typedText: e.target.value })
                   }
-                  placeholder="SUPPRIMER"
+                  placeholder="DELETE"
                   className="w-full rounded-lg border border-[#1a2840] bg-[#060a10] px-3 py-2 text-sm text-slate-300 placeholder-[#4a6080] outline-none focus:border-rose-500/50 transition-colors duration-150"
                   autoFocus
                 />
+                {confirmState.progress !== null && (
+                  <div className="mt-4">
+                    <div className="mb-1 flex justify-between text-xs text-[#4a6080]">
+                      <span>Processing…</span>
+                      <span>{confirmState.progress + 1} / {canForce.length}</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1a2840]">
+                      <div
+                        className="h-full rounded-full bg-rose-500 transition-all duration-200"
+                        style={{ width: `${Math.round(((confirmState.progress + 1) / canForce.length) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {errorMsg && (
                   <p className="mt-3 text-xs text-rose-400">{errorMsg}</p>
                 )}
@@ -269,7 +306,7 @@ export default function BatchBar({
                   </button>
                   <button
                     onClick={() => executeForce(confirmState.destFolder)}
-                    disabled={confirmState.typedText !== "SUPPRIMER" || isProcessing}
+                    disabled={confirmState.typedText !== "DELETE" || isProcessing}
                     className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
                   >
                     {isProcessing ? "Processing…" : "Execute"}

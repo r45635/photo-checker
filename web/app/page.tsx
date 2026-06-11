@@ -7,6 +7,7 @@ import PhotoCard from "@/components/PhotoCard"
 import DetailPanel from "@/components/DetailPanel"
 import BatchBar from "@/components/BatchBar"
 import ScanDialog from "@/components/ScanDialog"
+import Toast from "@/components/Toast"
 import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
 import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
 
@@ -29,6 +30,7 @@ export default function HomePage() {
   const [scanOpen, setScanOpen] = useState(false)
   const [rescanLoading, setRescanLoading] = useState(false)
   const [visibleCount, setVisibleCount] = useState(32)
+  const [toast, setToast] = useState<string | null>(null)
 
   // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -186,6 +188,49 @@ export default function HomePage() {
     return () => observer.disconnect()
   }, [visibleCount, filtered.length])
 
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === "INPUT" || tag === "TEXTAREA") return
+
+      if (e.key === "Escape") {
+        if (detail) { setDetail(null); return }
+        if (batch.size > 0) { setBatch(new Set()); return }
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+        e.preventDefault()
+        handleSelectAll()
+        return
+      }
+
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault()
+        const idx = detail ? (filteredIndexMap.get(detail.path) ?? -1) : -1
+        const next = filtered[Math.min(idx + 1, filtered.length - 1)]
+        if (next) setDetail(next)
+        return
+      }
+
+      if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault()
+        const idx = detail ? (filteredIndexMap.get(detail.path) ?? 0) : 0
+        const prev = filtered[Math.max(idx - 1, 0)]
+        if (prev) setDetail(prev)
+        return
+      }
+
+      if (e.key === " " && detail) {
+        e.preventDefault()
+        handleSelect(detail.path)
+        return
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [detail, filtered, filteredIndexMap, batch])
+
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleSelect(path: string) {
     const idx = filteredIndexMap.get(path) ?? -1
@@ -262,7 +307,7 @@ export default function HomePage() {
     })
   }
 
-  function handleDeleted(paths: string[]) {
+  function handleDeleted(paths: string[], message?: string) {
     const set = new Set(paths)
     setRecords((prev) => prev.filter((r) => !set.has(r.path)))
     setBatch((prev) => {
@@ -270,6 +315,7 @@ export default function HomePage() {
       paths.forEach((p) => next.delete(p))
       return next
     })
+    if (message) setToast(message)
   }
 
   async function handleScanned(slug: string) {
@@ -583,6 +629,9 @@ export default function HomePage() {
         onClose={() => setScanOpen(false)}
         onScanned={handleScanned}
       />
+
+      {/* Toast */}
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   )
 }

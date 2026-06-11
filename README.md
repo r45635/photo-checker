@@ -27,9 +27,9 @@ A macOS tool that scans a local folder of photos and checks — by filename — 
 ## What it does
 
 - Scans a local folder (optionally recursive) and checks each photo by filename against:
-  - **Apple Photos** — reads the local Photos library directly via `osxphotos` (no API, no network)
-  - **Google Photos** — via Google Photos Library REST API (OAuth 2.0, cached locally 24 h)
-  - **OneDrive** — via Microsoft Graph API (MSAL device-flow auth, token persisted)
+  - **Apple Photos** ✅ — reads the local Photos library directly via `osxphotos` (no API, no network)
+  - **Google Photos** 🚧 *(coming soon)* — API backend exists, UI integration in progress
+  - **OneDrive** 🚧 *(coming soon)* — API backend exists, UI integration in progress
 - Labels each file: `YES` (safe to delete — confirmed backup), `NO` (not found), `MAYBE` (found but a check errored)
 - Lets you select files and **move to Trash** (`send2trash`), **import to Apple Photos**, or **force-move** to a folder
 - Results are stored as JSON locally and browsable across sessions
@@ -142,7 +142,7 @@ cd web && npm run dev                        # UI on :3000 → open http://local
 5. From the batch bar:
    - **Trash** — move confirmed YES files to macOS Trash (recoverable)
    - **Import** — send NO files to Apple Photos
-   - **Force delete** — move or trash files without confirmed backup (requires typing `SUPPRIMER`)
+   - **Force delete** — move or trash files without confirmed backup (requires typing `DELETE`)
 
 ---
 

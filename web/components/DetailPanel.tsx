@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon } from "lucide-react"
+import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon, FolderOpen } from "lucide-react"
 import type { PhotoRecord, ApplePhotoInfo } from "@/lib/types"
 import {
   thumbnailUrl,
@@ -11,6 +11,7 @@ import {
   importPhoto,
   patchRecord,
   openInPhotos,
+  openInFinder,
 } from "@/lib/api"
 import VideoPlayer from "./VideoPlayer"
 
@@ -104,6 +105,15 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
     }
   }
 
+  async function handleRevealInFinder() {
+    if (!record) return
+    try {
+      await openInFinder(record.path)
+    } catch {
+      // best-effort
+    }
+  }
+
   const isOpen = record !== null
 
   return (
@@ -135,6 +145,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                   "text-xs font-bold px-2 py-0.5 rounded-full shrink-0",
                   STATUS_STYLES[record.safe_to_delete] ?? "bg-slate-700 text-slate-300",
                 ].join(" ")}
+                title={record.safe_to_delete === "MAYBE" ? "Found in at least one source, but a check errored — verify before deleting" : undefined}
               >
                 {record.safe_to_delete}
               </span>
@@ -346,6 +357,13 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                 </div>
               )}
               <p className="text-xs text-slate-700 break-all pt-0.5">{record.path}</p>
+              <button
+                onClick={handleRevealInFinder}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#1a2840] px-3 py-2 text-xs text-slate-500 hover:text-slate-300 hover:border-[#2a3850] transition-colors duration-150"
+              >
+                <FolderOpen size={11} />
+                Reveal in Finder
+              </button>
             </div>
           </>
         )}

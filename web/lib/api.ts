@@ -57,15 +57,49 @@ export async function getAppleInfo(filename: string, backupPath?: string): Promi
 
 export async function scanFolder(
   folder: string,
-  recursive: boolean
+  recursive: boolean,
+  onProgress?: (current: number, total: number, file: string) => void
 ): Promise<{ slug: string; output: string }> {
   const res = await fetch(`${BASE}/api/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ folder, recursive }),
   })
-  await throwIfNotOk(res)
-  return res.json()
+
+  if (!res.ok) {
+    const text = await res.text()
+    try {
+      const j = JSON.parse(text)
+      throw new Error(j.detail ?? text)
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text)
+      throw e
+    }
+  }
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = JSON.parse(line.slice(6))
+      if (data.type === "progress" && onProgress) {
+        onProgress(data.current, data.total, data.file)
+      } else if (data.type === "done") {
+        return { slug: data.slug, output: data.output ?? "" }
+      } else if (data.type === "error") {
+        throw new Error(data.detail)
+      }
+    }
+  }
+  throw new Error("Scan stream ended unexpectedly")
 }
 
 export async function importPhoto(path: string): Promise<void> {

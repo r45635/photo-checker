@@ -19,7 +19,7 @@ export default function VideoPlayer({ videoSrc, posterSrc, className = "" }: Vid
       return (
         <div className={`flex flex-col items-center justify-center gap-2 text-[#4a6080] ${className}`}>
           <ImageOff size={32} />
-          <span className="text-xs">Lecture impossible</span>
+          <span className="text-xs">Playback unavailable</span>
         </div>
       )
     }

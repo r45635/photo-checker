@@ -31,6 +31,10 @@ _COPY_SUFFIX_RE = re.compile(
 def _strip_copy_suffix(stem: str) -> str:
     return _COPY_SUFFIX_RE.sub('', stem)
 
+_UUID_RE = re.compile(
+    r'^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+)
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,6 +90,31 @@ def _load_result_file(slug: str) -> list[dict[str, Any]]:
 def _save_result_file(slug: str, records: list[dict[str, Any]]) -> None:
     path = RESULTS_DIR / f"{_stem_from_slug(slug)}.json"
     path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+_SENSITIVE_PREFIXES = (
+    "/etc", "/private/etc", "/System", "/usr/", "/bin/", "/sbin/",
+    str(Path.home() / ".ssh"),
+    str(Path.home() / ".photo_checker" / "tokens"),
+)
+
+_ALLOWED_MEDIA_EXTS = {
+    ".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".tiff", ".tif",
+    ".bmp", ".webp", ".raw", ".arw", ".cr2", ".nef", ".dng", ".orf", ".rw2",
+    ".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm",
+}
+
+
+def _validate_media_path(path: str) -> Path:
+    """Guard thumbnail/video endpoints against path traversal."""
+    p = Path(path).resolve()
+    ps = str(p)
+    for prefix in _SENSITIVE_PREFIXES:
+        if ps.startswith(prefix):
+            raise HTTPException(status_code=403, detail="Access denied")
+    if p.suffix.lower() not in _ALLOWED_MEDIA_EXTS:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+    return p
 
 
 def _compute_subfolders(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -232,7 +261,7 @@ def get_thumbnail(path: str = Query(...), size: int = Query(400)) -> Response:
     Generate and return a JPEG thumbnail for the given file path.
     Uses Pillow (+pillow-heif) for images, qlmanage for videos.
     """
-    file_path = Path(path)
+    file_path = _validate_media_path(path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -317,7 +346,7 @@ VIDEO_MIME: dict[str, str] = {
 @app.get("/api/video")
 def stream_video(path: str = Query(...)) -> FileResponse:
     """Stream a video file directly so the browser can play it."""
-    file_path = Path(path)
+    file_path = _validate_media_path(path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     ext = file_path.suffix.lower()
@@ -377,6 +406,26 @@ def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400), path
     )
 
 
+def _photos_library_path() -> Path | None:
+    db = Path.home() / "Pictures" / "Photos Library.photoslibrary" / "database" / "Photos.sqlite"
+    return db if db.exists() else None
+
+
+def _check_photos_permission() -> str:
+    """Returns 'ok', 'no_library', or 'permission_denied'."""
+    db = _photos_library_path()
+    if db is None:
+        return "no_library"
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.execute("SELECT 1")
+        con.close()
+        return "ok"
+    except Exception:
+        return "permission_denied"
+
+
 _apple_cache: dict | None = None
 _sqlite_apple_names: set | None = None
 
@@ -416,7 +465,7 @@ def _sqlite_name_found(filename: str) -> bool:
 
 
 def _get_apple_cache() -> dict | None:
-    """Lazy-load and cache the PhotosDB name+fingerprint indexes."""
+    """Lazy-load and cache the PhotosDB name+fingerprint+uuid indexes."""
     global _apple_cache
     if _apple_cache is not None:
         return _apple_cache
@@ -426,13 +475,15 @@ def _get_apple_cache() -> dict | None:
         photos = db.photos()
         names: dict = {}
         fingerprints: dict = {}
+        uuids: dict = {}
         for p in photos:
             key = _nfc(p.original_filename).lower()
             if key not in names:
                 names[key] = p
             if p.fingerprint:
                 fingerprints[p.fingerprint] = p
-        _apple_cache = {"names": names, "fingerprints": fingerprints}
+            uuids[p.uuid] = p
+        _apple_cache = {"names": names, "fingerprints": fingerprints, "uuids": uuids}
         return _apple_cache
     except Exception as exc:
         print(f"[apple] cache build error: {exc}", file=sys.stderr)
@@ -449,31 +500,68 @@ def _file_sha1(path: Path) -> str:
 
 
 def _find_apple_photo(filename: str, backup_path: str | None = None):
-    """Return an osxphotos PhotoInfo matching by filename, then SHA1 fingerprint."""
+    """Return an osxphotos PhotoInfo matching by filename, osxphotos fingerprint,
+    or direct SHA1 comparison against the Apple Photos originals folder."""
     cache = _get_apple_cache()
     if cache is None:
         return None
+    # 1. Exact name match
     photo = cache["names"].get(_nfc(filename).lower())
     if photo is not None:
         return photo
+    # 2. Strip " - Copy" suffix
     p = Path(filename)
     stem_stripped = _strip_copy_suffix(p.stem)
     if stem_stripped != p.stem:
         photo = cache["names"].get(_nfc(stem_stripped + p.suffix).lower())
         if photo is not None:
             return photo
+    # 3. Add " - Copy" suffix
     copy_alt = _nfc(p.stem + " - Copy" + p.suffix).lower()
     photo = cache["names"].get(copy_alt)
     if photo is not None:
         return photo
-    if backup_path:
-        try:
-            p = Path(backup_path)
-            if p.is_file():
-                sha1 = _file_sha1(p)
-                return cache["fingerprints"].get(sha1)
-        except Exception as exc:
-            print(f"[apple] fingerprint lookup error for {filename}: {exc}", file=sys.stderr)
+    if not backup_path:
+        return None
+    bp = Path(backup_path)
+    if not bp.is_file():
+        return None
+    # 4. osxphotos fingerprint hash
+    try:
+        backup_sha1 = _file_sha1(bp)
+        photo = cache["fingerprints"].get(backup_sha1)
+        if photo is not None:
+            return photo
+    except Exception as exc:
+        print(f"[apple] fingerprint lookup error for {filename}: {exc}", file=sys.stderr)
+        return None
+    # 5. Direct SHA1 against originals folder (same as check_apple step 4 in scan)
+    try:
+        import sqlite3
+        db_path = _photos_library_path()
+        if db_path is None:
+            return None
+        size = bp.stat().st_size
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur = con.cursor()
+        cur.execute("""
+            SELECT a.ZUUID, a.ZFILENAME
+            FROM   ZASSET a
+            JOIN   ZADDITIONALASSETATTRIBUTES aa ON aa.ZASSET = a.Z_PK
+            WHERE  a.ZTRASHEDSTATE = 0
+              AND  aa.ZORIGINALFILESIZE = ?
+        """, (size,))
+        rows = cur.fetchall()
+        con.close()
+        originals = db_path.parent.parent / "originals"
+        for uuid, zfilename in rows:
+            if not uuid or not zfilename:
+                continue
+            lib_file = originals / uuid[0] / f"{uuid}{Path(zfilename).suffix}"
+            if lib_file.exists() and _file_sha1(lib_file) == backup_sha1:
+                return cache["uuids"].get(uuid)
+    except Exception as exc:
+        print(f"[apple] SHA1 originals lookup error for {filename}: {exc}", file=sys.stderr)
     return None
 
 
@@ -510,7 +598,7 @@ def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -
 
 # ── POST /api/scan ───────────────────────────────────────────────────────────────
 
-def _do_scan(folder: Path, recursive: bool) -> tuple[str, list[dict]]:
+def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list[dict]]:
     """Run the Apple-Photos check in-process and return (log_output, results)."""
     # Import photo_checker from sibling directory (works in dev and when bundled)
     _pc_dir = str(_BUNDLE_DIR)
@@ -538,6 +626,9 @@ def _do_scan(folder: Path, recursive: bool) -> tuple[str, list[dict]]:
         apple_sizes   = apple_result[1] if apple_result else None
         print()
 
+        if on_progress:
+            on_progress(0, len(photos), "Loading Apple Photos database…")
+
         results = []
         for i, photo in enumerate(photos, 1):
             apple = check_apple(photo.name, apple_names, apple_sizes, photo)
@@ -556,33 +647,71 @@ def _do_scan(folder: Path, recursive: bool) -> tuple[str, list[dict]]:
             })
             icon = "OK" if safe else ("?" if found_in and has_error else "NO")
             print(f"[{i:>4}/{len(photos)}] [{icon}] {photo.name}")
+            if on_progress:
+                on_progress(i, len(photos), photo.name)
 
     return log.getvalue(), results
 
 
 @app.post("/api/scan")
-def scan(body: ScanBody) -> dict[str, str]:
-    """Scan a folder for photos and check against Apple Photos (in-process)."""
+async def scan(body: ScanBody) -> StreamingResponse:
+    """Scan a folder, streaming SSE progress events then a done/error event."""
+    import asyncio
+    import queue as _queue
+    import threading
+
     folder = Path(body.folder).expanduser().resolve()
     if not folder.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {folder}")
 
+    perm = _check_photos_permission()
+    if perm == "permission_denied":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Full Disk Access required. Open System Settings → Privacy & Security → "
+                "Full Disk Access, add this app, then restart it."
+            ),
+        )
+
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     slug = folder.name
+    q: _queue.Queue = _queue.Queue()
 
-    try:
-        log, results = _do_scan(folder, body.recursive)
-        if not results:
-            raise HTTPException(status_code=400, detail=f"No photos found in {folder}")
+    def _run() -> None:
+        try:
+            def _progress(current: int, total: int, filename: str) -> None:
+                q.put({"type": "progress", "current": current, "total": total, "file": filename})
 
-        json_path = RESULTS_DIR / f"{slug}.json"
-        json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-        return {"slug": _slug_from_stem(slug), "output": log}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        print(f"[scan] error: {exc}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+            log, results = _do_scan(folder, body.recursive, on_progress=_progress)
+            if not results:
+                q.put({"type": "error", "detail": f"No photos found in {folder}"})
+                return
+            json_path = RESULTS_DIR / f"{slug}.json"
+            json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+            q.put({"type": "done", "slug": _slug_from_stem(slug), "output": log})
+        except Exception as exc:
+            print(f"[scan] error: {exc}", file=sys.stderr)
+            q.put({"type": "error", "detail": str(exc)})
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    async def _generate():
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                item = await loop.run_in_executor(None, q.get, True, 1.0)
+                yield f"data: {json.dumps(item)}\n\n"
+                if item["type"] in ("done", "error"):
+                    break
+            except _queue.Empty:
+                yield 'data: {"type":"ping"}\n\n'
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 
 # ── POST /api/import ─────────────────────────────────────────────────────────────
@@ -775,6 +904,8 @@ def open_finder(body: OpenFinderBody) -> dict[str, str]:
 @app.post("/api/open-photos")
 def open_photos(body: OpenPhotosBody) -> dict[str, str]:
     """Spotlight a photo in Apple Photos by UUID via osascript."""
+    if not _UUID_RE.match(body.uuid):
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
     script = (
         f'tell application "Photos"\n'
         f'    activate\n'

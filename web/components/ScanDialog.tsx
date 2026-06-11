@@ -21,6 +21,7 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
   const [done, setDone] = useState(false)
   const [slug, setSlug] = useState("")
   const [visible, setVisible] = useState(false)
+  const [progress, setProgress] = useState<{ current: number; total: number; file: string } | null>(null)
 
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -46,6 +47,7 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       setError("")
       setDone(false)
       setSlug("")
+      setProgress(null)
       setTimeout(() => inputRef.current?.focus(), 150)
     }
   }, [open])
@@ -72,17 +74,11 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       const res = await fetch(`${BASE}/api/pick-folder`)
       if (res.ok) {
         const data = await res.json()
-        if (data.path) {
-          setFolderPath(data.path)
-          return
-        }
+        if (data.path) setFolderPath(data.path)
       }
     } catch {
-      // fall through to prompt
+      // Native dialog unavailable — user can type path manually
     }
-    // Native dialog unavailable or cancelled — fall back to text prompt
-    const path = window.prompt("Folder path:")
-    if (path) setFolderPath(path.trim())
   }
 
   async function handleScan() {
@@ -92,9 +88,14 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
     setError("")
     setDone(false)
     setSlug("")
+    setProgress(null)
 
     try {
-      const result = await scanFolder(folderPath.trim(), recursive)
+      const result = await scanFolder(
+        folderPath.trim(),
+        recursive,
+        (current, total, file) => setProgress({ current, total, file })
+      )
       setOutput(result.output ?? "")
       setSlug(result.slug)
       setDone(true)
@@ -102,6 +103,7 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setScanning(false)
+      setProgress(null)
     }
   }
 
@@ -268,6 +270,31 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
           </div>
           <span style={{ fontSize: "0.875rem", color: "#cbd5e1" }}>Include subfolders</span>
         </label>
+
+        {/* Progress bar */}
+        {scanning && progress && (
+          <div style={{ marginBottom: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "#4a6080", marginBottom: "4px" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: "8px" }}>
+                {progress.current === 0 ? progress.file : progress.file}
+              </span>
+              <span style={{ flexShrink: 0 }}>
+                {progress.current > 0 ? `${progress.current} / ${progress.total}` : `0 / ${progress.total}`}
+              </span>
+            </div>
+            <div style={{ height: "4px", background: "#1a2840", borderRadius: "2px", overflow: "hidden" }}>
+              <div
+                style={{
+                  height: "100%",
+                  background: "#3b82f6",
+                  borderRadius: "2px",
+                  width: progress.total > 0 ? `${Math.round((progress.current / progress.total) * 100)}%` : "0%",
+                  transition: "width 200ms ease-out",
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Output area */}
         {showOutputArea && (

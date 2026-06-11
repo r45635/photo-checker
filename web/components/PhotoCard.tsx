@@ -55,6 +55,7 @@ export default function PhotoCard({
         selected && "ring-2 ring-blue-500 ring-offset-1 ring-offset-[#060a10]"
       )}
       onClick={() => onView(record)}
+      title={record.safe_to_delete === "MAYBE" ? "Found in at least one source but a check errored — verify before deleting" : undefined}
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-[#080e1a] relative overflow-hidden">
