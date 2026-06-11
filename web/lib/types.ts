@@ -23,7 +23,7 @@ export interface ResultFile {
 }
 
 export interface ApplePhotoInfo {
-  uuid: string
+  uuid: string | null
   date: string | null
   albums: string[]
   keywords: string[]

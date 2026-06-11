@@ -378,6 +378,41 @@ def get_apple_thumbnail(filename: str = Query(...), size: int = Query(400), path
 
 
 _apple_cache: dict | None = None
+_sqlite_apple_names: set | None = None
+
+
+def _load_sqlite_apple_names() -> set:
+    """Direct SQLite name set — same source as the scan. Cached per server lifetime."""
+    global _sqlite_apple_names
+    if _sqlite_apple_names is not None:
+        return _sqlite_apple_names
+    _pc_dir = str(_BUNDLE_DIR)
+    if _pc_dir not in sys.path:
+        sys.path.insert(0, _pc_dir)
+    try:
+        from photo_checker import load_apple_photos_filenames as _load_afn
+        result = _load_afn()
+        _sqlite_apple_names = result[0] if result else set()
+    except Exception as exc:
+        print(f"[apple] sqlite names load error: {exc}", file=sys.stderr)
+        _sqlite_apple_names = set()
+    return _sqlite_apple_names
+
+
+def _sqlite_name_found(filename: str) -> bool:
+    """Check filename against the direct SQLite index (steps 1-3 of check_apple)."""
+    names = _load_sqlite_apple_names()
+    if not names:
+        return False
+    p = Path(filename)
+    if _nfc(filename).lower() in names:
+        return True
+    stem_stripped = _strip_copy_suffix(p.stem)
+    if stem_stripped != p.stem and _nfc(stem_stripped + p.suffix).lower() in names:
+        return True
+    if _nfc(p.stem + " - Copy" + p.suffix).lower() in names:
+        return True
+    return False
 
 
 def _get_apple_cache() -> dict | None:
@@ -449,6 +484,13 @@ def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -
     """Return Apple Photos metadata for a filename, or null if not found."""
     photo = _find_apple_photo(filename, backup_path=path)
     if photo is None:
+        # osxphotos missed it — fall back to the same direct SQLite check the scan uses
+        if _sqlite_name_found(filename):
+            return {
+                "uuid": None, "date": None, "albums": [], "keywords": [],
+                "favorite": False, "ismissing": False, "iscloudasset": False,
+                "has_local_copy": False,
+            }
         return None
     try:
         return {
@@ -591,8 +633,9 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
                 status_code=422,
                 detail=f"Photos accepted the command but did not import the file. stderr={warn!r}",
             )
-        global _apple_cache
-        _apple_cache = None  # invalidate so next scan sees the new photo
+        global _apple_cache, _sqlite_apple_names
+        _apple_cache = None         # invalidate osxphotos cache
+        _sqlite_apple_names = None  # invalidate SQLite cache
         return {"status": "imported", "path": str(file_path), "result": result}
     except HTTPException:
         raise

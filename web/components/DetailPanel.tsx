@@ -201,33 +201,41 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                     <p className="text-xs text-rose-400">Failed to load Apple Photos info.</p>
                   )}
                   {!appleLoading && !appleError && appleInfo === null && (
-                    <p className="text-xs text-[#4a6080]">Not found in Apple Photos.</p>
+                    <p className="text-xs text-amber-400/80">
+                      Found at scan time — re-scan to recheck current status.
+                    </p>
                   )}
                   {!appleLoading && !appleError && appleInfo !== null && (
                     <div className="flex flex-col gap-3">
-                      {/* Apple thumbnail */}
-                      <div className="rounded-xl overflow-hidden bg-[#080e1a] aspect-video flex items-center justify-center relative">
-                        {appleThumbError ? (
-                          <div className="flex flex-col items-center gap-2 text-[#4a6080]">
-                            <ImageIcon size={32} />
-                            <span className="text-xs">Preview unavailable</span>
-                          </div>
-                        ) : (
-                          <img
-                            src={appleThumbnailUrl(record.filename, record.path)}
-                            alt={`Apple Photos: ${record.filename}`}
-                            className="w-full h-full object-contain"
-                            onError={() => setAppleThumbError(true)}
-                          />
-                        )}
-                        {/* iCloud badge */}
-                        {appleInfo.iscloudasset && (
-                          <div className="absolute top-2 right-2 flex items-center gap-1 bg-[#0a1220]/80 backdrop-blur-sm px-2 py-1 rounded-full text-xs text-blue-400 border border-blue-500/30">
-                            <Cloud size={10} />
-                            <span>iCloud</span>
-                          </div>
-                        )}
-                      </div>
+                      {/* Apple thumbnail — only when we have a UUID (osxphotos found it) */}
+                      {appleInfo.uuid ? (
+                        <div className="rounded-xl overflow-hidden bg-[#080e1a] aspect-video flex items-center justify-center relative">
+                          {appleThumbError ? (
+                            <div className="flex flex-col items-center gap-2 text-[#4a6080]">
+                              <ImageIcon size={32} />
+                              <span className="text-xs">Preview unavailable</span>
+                            </div>
+                          ) : (
+                            <img
+                              src={appleThumbnailUrl(record.filename, record.path)}
+                              alt={`Apple Photos: ${record.filename}`}
+                              className="w-full h-full object-contain"
+                              onError={() => setAppleThumbError(true)}
+                            />
+                          )}
+                          {/* iCloud badge */}
+                          {appleInfo.iscloudasset && (
+                            <div className="absolute top-2 right-2 flex items-center gap-1 bg-[#0a1220]/80 backdrop-blur-sm px-2 py-1 rounded-full text-xs text-blue-400 border border-blue-500/30">
+                              <Cloud size={10} />
+                              <span>iCloud</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-emerald-400/70">
+                          Confirmed in Apple Photos library.
+                        </p>
+                      )}
 
                       {/* iCloud only warning */}
                       {appleInfo.iscloudasset && !appleInfo.has_local_copy && (
@@ -265,14 +273,16 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                         )}
                       </div>
 
-                      {/* Open in Photos button */}
-                      <button
-                        onClick={handleOpenInPhotos}
-                        className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg border border-[#1a2840] text-xs text-slate-400 hover:text-slate-200 hover:border-[#2a3850] transition-colors duration-150"
-                      >
-                        Open in Photos
-                        <ExternalLink size={11} />
-                      </button>
+                      {/* Open in Photos button — requires UUID from osxphotos */}
+                      {appleInfo.uuid && (
+                        <button
+                          onClick={handleOpenInPhotos}
+                          className="flex items-center justify-center gap-1.5 w-full px-3 py-2 rounded-lg border border-[#1a2840] text-xs text-slate-400 hover:text-slate-200 hover:border-[#2a3850] transition-colors duration-150"
+                        >
+                          Open in Photos
+                          <ExternalLink size={11} />
+                        </button>
+                      )}
                     </div>
                   )}
                 </section>
