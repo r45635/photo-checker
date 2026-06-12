@@ -14,7 +14,8 @@ export interface ResultFile {
   slug: string
   name: string
   mtime: number        // Unix timestamp
-  folder: string       // root folder that was scanned
+  scan_date: string    // ISO datetime of the last scan, empty string if unknown
+  folder: string       // actual folder that was scanned
   total: number
   yes: number
   no: number

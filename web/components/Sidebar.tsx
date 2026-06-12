@@ -59,6 +59,21 @@ function formatDate(ts: number): string {
   })
 }
 
+function formatIso(iso: string): string {
+  if (!iso) return ""
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  } catch {
+    return iso
+  }
+}
+
 function InfoModal({ result, onClose }: { result: ResultFile; onClose: () => void }) {
   const folderName = lastSegment(result.folder) || result.name
 
@@ -99,7 +114,9 @@ function InfoModal({ result, onClose }: { result: ResultFile; onClose: () => voi
         {/* Date */}
         <div className="mb-4">
           <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "#4a6080" }}>Scanned</p>
-          <p className="text-xs" style={{ color: "#94a3b8" }}>{result.mtime ? formatDate(result.mtime) : "—"}</p>
+          <p className="text-xs" style={{ color: "#94a3b8" }}>
+            {result.scan_date ? formatIso(result.scan_date) : result.mtime ? formatDate(result.mtime) : "—"}
+          </p>
         </div>
 
         {/* Stats */}
@@ -257,6 +274,10 @@ export default function Sidebar({
             <div className="space-y-0.5">
               {results.map((r) => {
                 const active = r.slug === selectedSlug
+                const displayName = lastSegment(r.folder) || r.name
+                const isDuplicate = results.filter(
+                  (x) => (lastSegment(x.folder) || x.name) === displayName
+                ).length > 1
                 return (
                   <div
                     key={r.slug}
@@ -268,12 +289,17 @@ export default function Sidebar({
                     {/* Name — clickable */}
                     <button
                       onClick={() => onSelectSlug(r.slug)}
-                      className="flex-1 text-left px-2 py-1.5 text-sm truncate min-w-0"
+                      className="flex-1 text-left px-2 py-1 min-w-0"
                       style={{ color: active ? "#60a5fa" : "#94a3b8" }}
                       onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = "#e2e8f0" }}
                       onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = "#94a3b8" }}
                     >
-                      {lastSegment(r.folder) || r.name}
+                      <p className="text-sm truncate">{displayName}</p>
+                      {(isDuplicate || r.scan_date) && (
+                        <p className="text-xs truncate" style={{ color: "#4a6080" }}>
+                          {isDuplicate ? r.folder : r.scan_date ? formatIso(r.scan_date) : ""}
+                        </p>
+                      )}
                     </button>
 
                     {/* Action icons — visible on row hover */}

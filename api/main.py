@@ -6,6 +6,7 @@ Wraps photo_checker.py logic and serves a Next.js frontend.
 
 from __future__ import annotations
 
+import datetime
 import io
 import json
 import os
@@ -75,6 +76,41 @@ def _slug_from_stem(stem: str) -> str:
 
 def _stem_from_slug(slug: str) -> str:
     return slug
+
+
+def _meta_file(slug: str) -> Path:
+    return RESULTS_DIR / f"{_stem_from_slug(slug)}-meta.json"
+
+
+def _load_scan_meta(slug: str) -> dict[str, Any]:
+    p = _meta_file(slug)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_scan_meta(slug: str, scan_folder: str) -> None:
+    meta = {
+        "scan_folder": scan_folder,
+        "scan_date": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+    _meta_file(slug).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+
+def _slug_for_folder(folder: str) -> str | None:
+    """Return the slug of any existing result that was scanned from `folder`, or None."""
+    for p in RESULTS_DIR.glob("*-meta.json"):
+        try:
+            meta = json.loads(p.read_text(encoding="utf-8"))
+            if meta.get("scan_folder") == folder:
+                stem = p.name[: -len("-meta.json")]
+                return _slug_from_stem(stem)
+        except Exception:
+            pass
+    return None
 
 
 def _load_result_file(slug: str) -> list[dict[str, Any]]:
@@ -190,19 +226,27 @@ def list_results() -> list[dict[str, Any]]:
     items = []
     for p in sorted(RESULTS_DIR.glob("*.json"), reverse=True):
         stem = p.stem
+        if stem.endswith("-meta"):
+            continue
         mtime = p.stat().st_mtime
         folder = ""
+        scan_date = ""
         total = yes = no = maybe = 0
         size_yes_mb = 0.0
         try:
+            meta = _load_scan_meta(stem)
+            if meta.get("scan_folder"):
+                folder = meta["scan_folder"]
+                scan_date = meta.get("scan_date", "")
             records = json.loads(p.read_text(encoding="utf-8"))
-            paths = [r["path"] for r in records if r.get("path")]
-            if paths:
-                try:
-                    common = os.path.commonpath(paths)
-                    folder = common if os.path.isdir(common) else str(Path(common).parent)
-                except (ValueError, OSError):
-                    folder = str(Path(paths[0]).parent)
+            if not folder:
+                paths = [r["path"] for r in records if r.get("path")]
+                if paths:
+                    try:
+                        common = os.path.commonpath(paths)
+                        folder = common if os.path.isdir(common) else str(Path(common).parent)
+                    except (ValueError, OSError):
+                        folder = str(Path(paths[0]).parent)
             total = len(records)
             for r in records:
                 s = r.get("safe_to_delete", "NO")
@@ -219,6 +263,7 @@ def list_results() -> list[dict[str, Any]]:
             "slug": _slug_from_stem(stem),
             "name": stem,
             "mtime": mtime,
+            "scan_date": scan_date,
             "folder": folder,
             "total": total,
             "yes": yes,
@@ -233,11 +278,14 @@ def list_results() -> list[dict[str, Any]]:
 
 @app.delete("/api/results/{slug}")
 def delete_result(slug: str) -> dict[str, str]:
-    """Delete a result JSON file."""
+    """Delete a result JSON file and its companion metadata file."""
     path = RESULTS_DIR / f"{_stem_from_slug(slug)}.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Result not found: {slug}")
     path.unlink()
+    meta = _meta_file(slug)
+    if meta.exists():
+        meta.unlink()
     return {"status": "deleted", "slug": slug}
 
 
@@ -675,7 +723,9 @@ async def scan(body: ScanBody) -> StreamingResponse:
         )
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    slug = folder.name
+    folder_str = str(folder)
+    existing_slug = _slug_for_folder(folder_str)
+    slug = existing_slug if existing_slug else folder.name
     q: _queue.Queue = _queue.Queue()
 
     def _run() -> None:
@@ -689,6 +739,7 @@ async def scan(body: ScanBody) -> StreamingResponse:
                 return
             json_path = RESULTS_DIR / f"{slug}.json"
             json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+            _save_scan_meta(slug, folder_str)
             q.put({"type": "done", "slug": _slug_from_stem(slug), "output": log})
         except Exception as exc:
             print(f"[scan] error: {exc}", file=sys.stderr)
