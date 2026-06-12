@@ -32,6 +32,18 @@ Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 - [x] Unicode NFC normalization fix (accented filenames: é, ü, ñ)
 - [x] Batch key switched from filename → path (fixes selection bugs for same-name files in different subfolders)
 - [x] README and screenshots
+- [x] Cross-format stem matching: JPEG backup ↔ HEIC stored in Photos (Live Photos)
+- [x] Copy-suffix stripping: "Copie" (FR) and "Copy" (EN) normalized before matching
+- [x] Silent Photos import (empty stdout) correctly treated as `already_in_photos`
+- [x] Scan metadata companion files (`{slug}-meta.json`) — prevents duplicate sidebar entries for same folder
+- [x] SSE real-time scan progress (`GET /api/scan/stream`)
+- [x] Keyboard shortcuts: j/k navigation, Space to select, ⌘A select all, Escape close
+- [x] Toast notifications after batch Trash / import / delete
+- [x] Reveal in Finder from detail panel and sidebar
+- [x] MAYBE status tooltip explaining the condition
+- [x] Auto-advance to next photo after import in detail panel
+- [x] Server log panel: rolling 500-line buffer, `GET /api/logs`, accessible via sidebar button
+- [x] Security: UUID format validation before AppleScript injection; path traversal guard on thumbnail/video endpoints
 
 ---
 
@@ -69,11 +81,16 @@ Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 
 ## Phase 4 — Polish
 
+- [x] Progress streaming during scan (SSE)
+- [x] Keyboard shortcuts (j/k, Space, ⌘A, Escape)
+- [x] Toast notifications after batch actions
+- [x] Reveal in Finder (sidebar + detail panel)
+- [x] MAYBE tooltip
+- [x] Server log panel
+- [x] Security hardening (UUID validation, path traversal guard)
 - [ ] Settings screen (API credentials, cache management)
-- [ ] Progress streaming during scan (SSE or WebSocket)
 - [ ] Export filtered results as CSV
 - [ ] Dark/light mode
-- [ ] Keyboard shortcuts (j/k navigation, space to select, d to delete)
 - [ ] Packaged macOS app (PyInstaller + Next.js static bundle)
 
 ---
@@ -86,3 +103,4 @@ Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 | Google cache is 24 h | Stale if you upload during the day | `--refresh-cache` flag exists; add UI button |
 | OneDrive: one API call per file | Slow for 5 000+ files | Phase 3: build an OneDrive filename cache |
 | Apple Photos only (Google/OneDrive not wired to UI) | Only one source checked | Phase 2 |
+| Apple Photos visual duplicate detection is opaque | Photos silently skips AI-detected duplicates — we can't tell which existing photo it matched | No bypass available via public API; treated as `already_in_photos` |

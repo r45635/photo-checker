@@ -2,20 +2,19 @@
 
 ## What this project is
 
-A macOS CLI tool that scans a local folder of photos and checks, by filename, whether each file already exists in one or more cloud/local repositories:
-- **Apple Photos** — via `osxphotos` (reads the local library directly, no API)
-- **Google Photos** — via Google Photos Library REST API (OAuth 2.0, cached locally 24 h)
-- **OneDrive** — via Microsoft Graph API (MSAL device-flow auth, token persisted)
+A macOS web app (FastAPI + Next.js 14) that scans a local folder of photos and checks, by filename, whether each file already exists in one or more cloud/local repositories:
+- **Apple Photos** — reads the Photos SQLite library directly via `osxphotos` (no API, no network). Fully working.
+- **Google Photos** — REST API backend exists; UI integration in progress.
+- **OneDrive** — Graph API backend exists; UI integration in progress.
 
 The goal: help the user decide which local backup files are safe to delete because they are already stored elsewhere.
 
-## Current state (proof-of-concept, no GUI)
+## Current state (web UI, Apple Photos fully functional)
 
-- Matching is **filename-based** (not hash — EXIF/tag edits change hashes, filenames are stable)
-- Output: CSV + JSON report
-- Flags: `--dry-run` (preview deletions), `--delete` (move to trash via `send2trash`)
-- Apple Photos works and was tested on a 1,697-file folder (237 found, ~849 MB recoverable)
-- Google Photos and OneDrive require API credentials not yet configured
+- FastAPI backend (`api/main.py`) + Next.js 14 static frontend (`web/`)
+- Matching is **filename-based** with cross-format stem fallback and copy-suffix stripping
+- Apple Photos tested on 37 000+ item library, 1 600-file scan folder
+- Google Photos and OneDrive backends exist but are not wired to the UI
 
 ## Repository
 
@@ -74,20 +73,24 @@ All sensitive files live **outside the repo** in `~/.photo_checker/`:
 ## Key design decisions (do not reverse without discussion)
 
 1. **Filename matching, not hash** — hashes are fragile after metadata edits.
-2. **Google Photos uses a local cache** — the API has no filename search; we list all items once and cache for 24 h to avoid thousands of paginated calls on every run.
-3. **OneDrive uses per-file Graph search** — `GET /me/drive/root/search(q='filename')` — reasonable for typical folder sizes.
-4. **Deletion moves to trash** (`send2trash`), never permanent `unlink`. Fallback: timestamped sibling folder `_photo_checker_trash_YYYYMMDD_HHMMSS/`.
-5. **`safe_to_delete = YES`** requires: found in ≥ 1 repo AND zero check errors. `MAYBE` = found somewhere but a check errored.
-6. **macOS `._` resource fork files are excluded** from scanning.
+2. **Cross-format stem matching** — `IMG_1495.JPG` matches `IMG_1495.HEIC`. iPhone Live Photos are stored as HEIC in Apple Photos but backup copies are often JPEG. `load_apple_photos_filenames()` returns a 3-tuple `(name_set, size_index, stem_set)`.
+3. **Copy-suffix stripping** — `_COPY_SUFFIX_RE` strips "- Copy", "- Copie", "_copy", "_copie" (case-insensitive, English + French) before matching. Both `photo_checker.py` and `api/main.py` share the same regex.
+4. **Photos silent skip = already imported** — Apple Photos exits 0 with empty stdout when its perceptual AI detects a visual duplicate. The import endpoint returns HTTP 200 / `already_in_photos` in that case.
+5. **Google Photos uses a local cache** — the API has no filename search; we list all items once and cache for 24 h to avoid thousands of paginated calls on every run.
+6. **OneDrive uses per-file Graph search** — `GET /me/drive/root/search(q='filename')` — reasonable for typical folder sizes.
+7. **Deletion moves to trash** (`send2trash`), never permanent `unlink`. Fallback: timestamped sibling folder `_photo_checker_trash_YYYYMMDD_HHMMSS/`.
+8. **`safe_to_delete = YES`** requires: found in ≥ 1 repo AND zero check errors. `MAYBE` = found somewhere but a check errored.
+9. **macOS `._` resource fork files are excluded** from scanning.
+10. **Scan metadata companion files** — `results/{slug}-meta.json` stores `scan_folder` (absolute path) and `scan_date` (ISO). `_slug_for_folder()` reuses the same slug on rescan, preventing duplicate sidebar entries.
+11. **In-memory log buffer** — `_LOG_BUFFER` (500-line deque, thread-safe). All backend logging goes through `_log(level, msg)` — never `print(stderr)` directly. Exposed via `GET /api/logs`.
+12. **UUID validation** — `open-photos` endpoint validates UUID format (`^[0-9A-F-]{36}$`) before embedding in AppleScript.
+13. **Path validation** — `_validate_media_path()` guards thumbnail/video endpoints against traversal into system paths or non-media extensions.
 
-## What must be validated before GUI MVP (see ROADMAP.md)
+## Apple Photos SQLite internals
 
-1. Google Photos OAuth flow end-to-end
-2. OneDrive OAuth flow end-to-end
-3. Accuracy of filename matching across all three sources on the same test folder
-4. Cache invalidation and refresh logic
-5. `--delete` / `send2trash` on a small real set
-6. Performance on a large folder (2 000+ files)
+- `ZASSET.ZFILENAME` is always a UUID-based internal name — **never use this for matching**.
+- `ZADDITIONALASSETATTRIBUTES.ZORIGINALFILENAME` is the original import filename — this is what we compare against.
+- `_sqlite_apple_names` (global set) and `_sqlite_apple_stems` (global set) are built once per server lifetime and invalidated on successful import.
 
 ## Coding conventions
 

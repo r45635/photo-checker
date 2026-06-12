@@ -384,7 +384,7 @@ def _image_thumbnail(file_path: Path, size: int) -> bytes | None:
             img.save(buf, format="JPEG", quality=85, optimize=True)
             return buf.getvalue()
     except Exception as exc:
-        print(f"[thumbnail] image error for {file_path}: {exc}", file=sys.stderr)
+        _log("ERROR", f"thumbnail image error for {file_path.name}: {exc}")
         return None
 
 
@@ -414,7 +414,7 @@ def _video_thumbnail(file_path: Path, size: int) -> bytes | None:
                 img.save(buf, format="JPEG", quality=85, optimize=True)
                 return buf.getvalue()
     except Exception as exc:
-        print(f"[thumbnail] video error for {file_path}: {exc}", file=sys.stderr)
+        _log("ERROR", f"thumbnail video error for {file_path.name}: {exc}")
         return None
 
 
@@ -529,7 +529,7 @@ def _load_sqlite_apple_names() -> tuple[set, set]:
         _sqlite_apple_names = result[0] if result else set()
         _sqlite_apple_stems = result[2] if result else set()
     except Exception as exc:
-        print(f"[apple] sqlite names load error: {exc}", file=sys.stderr)
+        _log("ERROR", f"apple sqlite names load error: {exc}")
         _sqlite_apple_names = set()
         _sqlite_apple_stems = set()
     return _sqlite_apple_names, _sqlite_apple_stems
@@ -575,7 +575,7 @@ def _get_apple_cache() -> dict | None:
         _apple_cache = {"names": names, "fingerprints": fingerprints, "uuids": uuids}
         return _apple_cache
     except Exception as exc:
-        print(f"[apple] cache build error: {exc}", file=sys.stderr)
+        _log("ERROR", f"apple cache build error: {exc}")
         return None
 
 
@@ -622,7 +622,7 @@ def _find_apple_photo(filename: str, backup_path: str | None = None):
         if photo is not None:
             return photo
     except Exception as exc:
-        print(f"[apple] fingerprint lookup error for {filename}: {exc}", file=sys.stderr)
+        _log("WARN", f"apple fingerprint lookup error for {filename}: {exc}")
         return None
     # 5. Direct SHA1 against originals folder (same as check_apple step 4 in scan)
     try:
@@ -650,7 +650,7 @@ def _find_apple_photo(filename: str, backup_path: str | None = None):
             if lib_file.exists() and _file_sha1(lib_file) == backup_sha1:
                 return cache["uuids"].get(uuid)
     except Exception as exc:
-        print(f"[apple] SHA1 originals lookup error for {filename}: {exc}", file=sys.stderr)
+        _log("WARN", f"apple SHA1 lookup error for {filename}: {exc}")
     return None
 
 
@@ -681,7 +681,7 @@ def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -
             "has_local_copy":  bool(photo.path and Path(photo.path).exists()),
         }
     except Exception as exc:
-        print(f"[apple-info] metadata error for {filename}: {exc}", file=sys.stderr)
+        _log("WARN", f"apple-info metadata error for {filename}: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -966,7 +966,7 @@ def move_files(body: MoveBody) -> dict[str, Any]:
             shutil.move(str(p), dest / p.name)
             moved.append(p_str)
         except Exception as exc:
-            print(f"[move] error moving {p}: {exc}", file=sys.stderr)
+            _log("ERROR", f"move failed for {p.name}: {exc}")
             errors.append({"path": p_str, "error": str(exc)})
 
     remaining = [r for r in records if r.get("path") not in set(moved)]
@@ -1020,7 +1020,7 @@ def open_photos(body: OpenPhotosBody) -> dict[str, str]:
     except HTTPException:
         raise
     except Exception as exc:
-        print(f"[open-photos] error: {exc}", file=sys.stderr)
+        _log("WARN", f"open-photos error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

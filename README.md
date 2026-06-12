@@ -42,19 +42,21 @@ A macOS tool that scans a local folder of photos and checks — by filename — 
 photo_checker/
 ├── photo_checker.py      # Core scan logic (filename matching, Apple Photos via osxphotos)
 ├── api/
-│   └── main.py           # FastAPI backend — scan, import, delete, thumbnails, Apple info
+│   └── main.py           # FastAPI backend — scan, import, delete, thumbnails, Apple info, logs
 ├── web/                  # Next.js 14 frontend (TypeScript, Tailwind)
-│   ├── app/page.tsx      # Main page — grid, filters, batch selection
+│   ├── app/page.tsx      # Main page — grid, filters, batch selection, keyboard shortcuts
 │   ├── components/
-│   │   ├── Sidebar.tsx   # Results list, filters, sort, subfolder nav
+│   │   ├── Sidebar.tsx   # Results list, filters, sort, subfolder nav, server logs button
 │   │   ├── PhotoCard.tsx # Thumbnail card with selection
-│   │   ├── DetailPanel.tsx  # Side panel — Apple Photos metadata, import button
-│   │   ├── BatchBar.tsx  # Bottom bar — multi-select actions
-│   │   └── ScanDialog.tsx   # Folder scan dialog
+│   │   ├── DetailPanel.tsx  # Side panel — Apple Photos metadata, import, Reveal in Finder
+│   │   ├── BatchBar.tsx  # Bottom bar — multi-select actions with progress
+│   │   ├── ScanDialog.tsx   # Folder scan dialog with SSE progress
+│   │   ├── LogPanel.tsx  # Server log viewer (rolling 500-line buffer)
+│   │   └── Toast.tsx     # Toast notifications after batch actions
 │   └── lib/
 │       ├── api.ts        # Typed fetch wrappers
 │       └── types.ts      # Shared TypeScript interfaces
-├── results/              # Scan results (JSON, local only)
+├── results/              # Scan results (JSON + companion meta files, local only)
 └── docs/screenshots/     # UI screenshots
 ```
 
@@ -135,14 +137,26 @@ cd web && npm run dev                        # UI on :3000 → open http://local
 
 ## Usage
 
-1. Click **Scan folder** → pick a folder path → optionally enable **Include subfolders** → **Scan**
-2. Results appear in the grid. Use the filter bar (**YES / NO / MAYBE / ALL**) and subfolder list to navigate
-3. Click any photo to open the **detail panel** — shows Apple Photos metadata (albums, date, cloud status) and an import button if not yet backed up
-4. Check individual photos or use **shift-click** to range-select; the **batch bar** appears at the bottom
+1. Click **Scan folder** → pick a folder path → optionally enable **Include subfolders** → **Scan**  
+   A live progress bar shows files scanned in real time.
+2. Results appear in the grid. Use the filter bar (**YES / NO / MAYBE / ALL**) and subfolder list to navigate.
+3. Click any photo to open the **detail panel** — shows Apple Photos metadata (albums, date, cloud status) and an import button if not yet backed up. Use **Reveal in Finder** to locate the file on disk.
+4. Check individual photos or use **shift-click** to range-select; the **batch bar** appears at the bottom.
 5. From the batch bar:
    - **Trash** — move confirmed YES files to macOS Trash (recoverable)
-   - **Import** — send NO files to Apple Photos
+   - **Import** — send NO files to Apple Photos (with live progress and auto-advance to next photo)
    - **Force delete** — move or trash files without confirmed backup (requires typing `DELETE`)
+6. Use **Server logs** (bottom of sidebar) to inspect backend activity and diagnose import errors.
+
+### Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `j` / `↓` | Next photo |
+| `k` / `↑` | Previous photo |
+| `Space` | Toggle selection |
+| `⌘A` | Select all visible |
+| `Escape` | Close detail panel / deselect |
 
 ---
 
@@ -152,10 +166,16 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 
 **Unicode normalization**: macOS filesystem paths come in NFD form; Apple Photos stores `original_filename` in NFC. The tool normalizes both sides to NFC before comparing, so filenames with accented characters (é, ü, ñ) match correctly.
 
+**Cross-format stem matching**: iPhone Live Photos are stored in Apple Photos as HEIC but backup copies are often JPEG. `IMG_1495.JPG` matches `IMG_1495.HEIC` by comparing stems (filename without extension). This prevents false negatives for converted photos.
+
+**Copy-suffix stripping**: Files like `IMG_1234 - Copy.jpg`, `IMG_1234 - Copie.jpg`, `IMG_1234_copy.JPG` are normalized to their base name before matching. Supports English ("copy") and French ("copie") suffixes.
+
 **Fingerprint fallback**: for Apple Photos, the SHA-1 fingerprint stored in the Photos DB is checked as a secondary signal when the filename doesn't match (catches files that were renamed after import).
 
+**Visual duplicate detection**: Apple Photos uses perceptual AI to detect duplicate photos during import, even when filenames and file sizes differ (e.g., a JPEG re-export of a HEIC). When Photos silently skips an import (empty stdout, exit 0), the tool correctly treats this as `already_in_photos` — a successful match.
+
 **`safe_to_delete = YES`** requires: found in ≥ 1 repository AND zero check errors.  
-**`safe_to_delete = MAYBE`** = found somewhere but at least one check errored.
+**`safe_to_delete = MAYBE`** = found somewhere but at least one check errored. Hovering the MAYBE badge shows an explanation.
 
 ---
 
@@ -164,15 +184,21 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 | Decision | Reason |
 |---|---|
 | Filename matching (not hash) | EXIF/tag edits change hashes; filenames are stable |
+| Cross-format stem matching | iPhone Live Photos saved as HEIC but backups are JPEG — same stem, different extension |
+| Copy-suffix stripping | Users make copies like "IMG_1234 - Copie.jpg"; these are the same photo |
 | Google Photos uses a local 24 h cache | The API has no filename search; listing everything once avoids thousands of paginated API calls |
 | OneDrive uses per-file Graph search | `GET /me/drive/root/search(q='filename')` — acceptable for typical folder sizes |
 | Deletion via `send2trash` | Never permanent; files land in macOS Trash and can be restored |
 | `skip check duplicates true` in AppleScript import | Prevents Photos from showing a blocking dialog that would time out the API |
-| Results stored as local JSON | No database dependency; easy to inspect and version-control |
-
----
+| Silent import (empty stdout) = success | Photos silently skips visual duplicates (exit 0, no output) — correctly treated as already imported |
+| Results stored as local JSON + companion meta | No database dependency; companion `{slug}-meta.json` stores actual scanned folder path to prevent duplicate entries |
+| In-memory 500-line log buffer | Visible via `GET /api/logs` and the Server logs panel — helps diagnose silent failures |
+| UUID validation before AppleScript | `open-photos` validates UUID format to prevent AppleScript injection |
+| Path validation on thumbnail/video endpoints | `_validate_media_path()` blocks traversal into system paths and non-media extensions |
 
 ## Tested
 
 - Apple Photos: 37 000+ item library, 1 600-file scan folder, 402 confirmed duplicates detected
 - Unicode normalization fix: 392 additional matches found after NFC normalization (files with accented names, e.g. Chloé)
+- Cross-format stem matching: correctly detects HEIC-stored Live Photos from JPEG backup files
+- Visual duplicate detection: Photos' perceptual AI is now handled correctly (silent skip = already imported)
