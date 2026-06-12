@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Trash2,
   Info,
+  ScrollText,
 } from "lucide-react"
 import type { FilterStatus, ResultFile, SortBy } from "@/lib/types"
 
@@ -36,6 +37,7 @@ interface SidebarProps {
   onRescanResult: (slug: string, folder: string) => void
   onOpenFinderResult: (folder: string) => void
   onDeleteResult: (slug: string) => void
+  onShowLogs: () => void
   stats: { total: number; yes: number; no: number; maybe: number; yesMB: number }
 }
 
@@ -185,6 +187,7 @@ export default function Sidebar({
   onRescanResult,
   onOpenFinderResult,
   onDeleteResult,
+  onShowLogs,
   stats,
 }: SidebarProps) {
   const [infoResult, setInfoResult] = useState<ResultFile | null>(null)
@@ -484,6 +487,19 @@ export default function Sidebar({
             </div>
           </>
         )}
+        {/* ── Logs button ── */}
+        <div className="px-3 pb-3 mt-auto shrink-0">
+          <button
+            onClick={onShowLogs}
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors duration-150"
+            style={{ color: "#4a6080", background: "transparent" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#94a3b8"; e.currentTarget.style.background = "#0d1625" }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#4a6080"; e.currentTarget.style.background = "transparent" }}
+          >
+            <ScrollText size={13} />
+            Server logs
+          </button>
+        </div>
       </aside>
 
       {/* ── Info modal ── */}

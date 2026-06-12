@@ -8,6 +8,7 @@ import DetailPanel from "@/components/DetailPanel"
 import BatchBar from "@/components/BatchBar"
 import ScanDialog from "@/components/ScanDialog"
 import Toast from "@/components/Toast"
+import LogPanel from "@/components/LogPanel"
 import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
 import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
 
@@ -31,6 +32,7 @@ export default function HomePage() {
   const [rescanLoading, setRescanLoading] = useState(false)
   const [visibleCount, setVisibleCount] = useState(32)
   const [toast, setToast] = useState<string | null>(null)
+  const [showLogs, setShowLogs] = useState(false)
 
   // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -459,6 +461,7 @@ export default function HomePage() {
         onRescanResult={handleRescanResult}
         onOpenFinderResult={handleOpenFinderResult}
         onDeleteResult={handleDeleteResult}
+        onShowLogs={() => setShowLogs(true)}
         stats={stats}
       />
 
@@ -644,6 +647,9 @@ export default function HomePage() {
 
       {/* Toast */}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+
+      {/* Log panel */}
+      {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
     </div>
   )
 }

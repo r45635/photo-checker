@@ -6,9 +6,11 @@ Wraps photo_checker.py logic and serves a Next.js frontend.
 
 from __future__ import annotations
 
+import collections
 import datetime
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -53,6 +55,30 @@ _DATA_DIR   = Path.home() / ".photo_checker" if _FROZEN else _BUNDLE_DIR
 # photo_checker.py is imported directly (see _do_scan); these are dev-only fallbacks.
 RESULTS_DIR = _DATA_DIR / "results"
 STATIC_DIR  = _BUNDLE_DIR / "web" / "out"
+
+# ── In-memory log buffer ────────────────────────────────────────────────────────
+
+import threading as _threading
+
+_LOG_LOCK = _threading.Lock()
+_LOG_BUFFER: collections.deque = collections.deque(maxlen=500)
+
+
+def _log(level: str, msg: str) -> None:
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {level:5s} {msg}"
+    with _LOG_LOCK:
+        _LOG_BUFFER.append(line)
+    print(line, file=sys.stderr)
+
+
+class _LogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        _log(record.levelname[:5], self.format(record))
+
+
+logging.getLogger().addHandler(_LogHandler())
+
 
 # ── App ─────────────────────────────────────────────────────────────────────────
 
@@ -215,6 +241,16 @@ class OpenFinderBody(BaseModel):
 
 class OpenPhotosBody(BaseModel):
     uuid: str
+
+
+# ── GET /api/logs ────────────────────────────────────────────────────────────────
+
+@app.get("/api/logs")
+def get_logs(n: int = Query(default=200, ge=1, le=500)) -> list[str]:
+    """Return the last n server log lines (newest last)."""
+    with _LOG_LOCK:
+        lines = list(_LOG_BUFFER)
+    return lines[-n:]
 
 
 # ── GET /api/results ─────────────────────────────────────────────────────────────
@@ -748,7 +784,7 @@ async def scan(body: ScanBody) -> StreamingResponse:
             _save_scan_meta(slug, folder_str)
             q.put({"type": "done", "slug": _slug_from_stem(slug), "output": log})
         except Exception as exc:
-            print(f"[scan] error: {exc}", file=sys.stderr)
+            _log("ERROR", f"scan failed: {exc}")
             q.put({"type": "error", "detail": str(exc)})
 
     threading.Thread(target=_run, daemon=True).start()
@@ -818,13 +854,14 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
             # Empty stdout = Photos recognised this as a duplicate and silently
             # skipped it (skip check duplicates true).  The file IS already in
             # the library — treat this as a successful import.
-            print(f"[import] already_in_photos (silent skip): {file_path}", file=sys.stderr)
+            _log("INFO", f"import already_in_photos (duplicate detected by Photos): {file_path.name}")
             return {"status": "already_in_photos", "path": str(file_path), "result": ""}
+        _log("INFO", f"import ok: {file_path.name}")
         return {"status": "imported", "path": str(file_path), "result": result}
     except HTTPException:
         raise
     except Exception as exc:
-        print(f"[import] error: {exc}", file=sys.stderr)
+        _log("ERROR", f"import failed for {file_path.name}: {exc}")
         raise HTTPException(status_code=500, detail="Import failed — check server logs.") from exc
 
 
@@ -898,7 +935,7 @@ def delete_files(body: DeleteBody) -> dict[str, Any]:
                 shutil.move(str(p), backup_dir / p.name)
             deleted.append(p_str)
         except Exception as exc:
-            print(f"[delete] error trashing {p}: {exc}", file=sys.stderr)
+            _log("ERROR", f"trash failed for {p.name}: {exc}")
             errors.append({"path": p_str, "error": str(exc)})
 
     # Remove successfully deleted records from JSON
