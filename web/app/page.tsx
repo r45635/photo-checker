@@ -293,6 +293,18 @@ export default function HomePage() {
 
   function handleImportedBatch(paths: string[]) {
     const set = new Set(paths)
+
+    // If the detail panel is showing an imported photo, advance to the next
+    // remaining photo so the user keeps their place in the list.
+    if (detail && set.has(detail.path)) {
+      const currentIdx = filteredIndexMap.get(detail.path) ?? -1
+      const nextPhoto =
+        filtered.slice(currentIdx + 1).find((r) => !set.has(r.path)) ??
+        filtered.slice(0, currentIdx).reverse().find((r) => !set.has(r.path)) ??
+        null
+      setDetail(nextPhoto)
+    }
+
     setRecords((prev) =>
       prev.map((r) =>
         set.has(r.path)
@@ -503,10 +515,10 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Rescan overlay */}
+          {/* Rescan overlay — fixed so it covers the whole main area regardless of scroll */}
           {rescanLoading && (
             <div
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4"
+              className="fixed inset-y-0 left-[260px] right-0 z-20 flex flex-col items-center justify-center gap-4"
               style={{ background: "rgba(6,10,16,0.85)", backdropFilter: "blur(4px)" }}
             >
               <div
