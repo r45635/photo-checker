@@ -25,7 +25,7 @@ def _nfc(s: str) -> str:
 
 
 _COPY_SUFFIX_RE = re.compile(
-    r'(\s*-\s*copy|\s+copy|_copy)+$',
+    r'(\s*-\s*copi[ey]|\s+copi[ey]|_copi[ey]|\s*-\s*copy|\s+copy|_copy)+$',
     re.IGNORECASE,
 )
 
@@ -810,19 +810,16 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
             err = stderr.decode().strip()
             raise HTTPException(status_code=500, detail=f"Photos import failed: {err}")
         result = stdout.decode().strip()
-        if not result:
-            # osascript exited 0 but Photos returned nothing — silent skip
-            # (can happen with special chars in path, permissions, or Photos busy)
-            warn = stderr.decode().strip()
-            print(f"[import] silent skip: {file_path}  stderr={warn!r}", file=sys.stderr)
-            raise HTTPException(
-                status_code=422,
-                detail=f"Photos accepted the command but did not import the file. stderr={warn!r}",
-            )
         global _apple_cache, _sqlite_apple_names, _sqlite_apple_stems
-        _apple_cache = None         # invalidate osxphotos cache
-        _sqlite_apple_names = None  # invalidate SQLite cache
+        _apple_cache = None
+        _sqlite_apple_names = None
         _sqlite_apple_stems = None
+        if not result:
+            # Empty stdout = Photos recognised this as a duplicate and silently
+            # skipped it (skip check duplicates true).  The file IS already in
+            # the library — treat this as a successful import.
+            print(f"[import] already_in_photos (silent skip): {file_path}", file=sys.stderr)
+            return {"status": "already_in_photos", "path": str(file_path), "result": ""}
         return {"status": "imported", "path": str(file_path), "result": result}
     except HTTPException:
         raise
