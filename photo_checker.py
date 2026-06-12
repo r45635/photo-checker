@@ -125,11 +125,13 @@ def _file_sha1(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_apple_photos_filenames() -> tuple[set, dict] | None:
-    """Return (name_set, size_index) or None on failure.
+def load_apple_photos_filenames() -> tuple[set, dict, set] | None:
+    """Return (name_set, size_index, stem_set) or None on failure.
 
     name_set  : lowercased NFC filenames from ZORIGINALFILENAME
     size_index: {file_size_bytes: [(uuid, extension), ...]} for SHA1 fallback
+    stem_set  : lowercased NFC stems (no extension) for cross-format matching
+                e.g. IMG_1495 matches IMG_1495.HEIC when backup is IMG_1495.JPG
 
     Reads Photos.sqlite directly (WAL included) — osxphotos misses recent
     imports because Photos.app keeps WAL changes in memory."""
@@ -153,15 +155,18 @@ def load_apple_photos_filenames() -> tuple[set, dict] | None:
               AND  aa.ZORIGINALFILENAME IS NOT NULL
         """)
         names: set = set()
+        stems: set = set()
         size_index: dict = {}
         for orig_fn, size, uuid, zfilename in cur.fetchall():
-            names.add(_nfc(orig_fn).lower())
+            nfc_fn = _nfc(orig_fn).lower()
+            names.add(nfc_fn)
+            stems.add(Path(nfc_fn).stem)
             if size and uuid and zfilename:
                 ext = Path(zfilename).suffix  # e.g. ".jpeg"
                 size_index.setdefault(int(size), []).append((uuid, ext))
         con.close()
         logging.info(f"Apple Photos: {len(names)} filenames, {len(size_index)} sizes loaded")
-        return names, size_index
+        return names, size_index, stems
     except Exception as e:
         print(f"Apple Photos error: {e}")
         return None
@@ -169,7 +174,8 @@ def load_apple_photos_filenames() -> tuple[set, dict] | None:
 
 def check_apple(filename: str, name_idx: set | None,
                 size_idx: dict | None = None,
-                filepath: Path | None = None) -> bool | None:
+                filepath: Path | None = None,
+                stem_idx: set | None = None) -> bool | None:
     if name_idx is None:
         return None
     p = Path(filename)
@@ -184,7 +190,10 @@ def check_apple(filename: str, name_idx: set | None,
     # 3. Backup has no " - Copy" → Apple Photos added it on import
     if _nfc(p.stem + " - Copy" + p.suffix).lower() in name_idx:
         return True
-    # 4. SHA1 fallback: match by file size then content
+    # 4. Cross-format stem match: IMG_1495.JPG → IMG_1495.HEIC (iPhone Live Photo)
+    if stem_idx is not None and _nfc(p.stem).lower() in stem_idx:
+        return True
+    # 5. SHA1 fallback: match by file size then content
     if size_idx and filepath and filepath.is_file():
         try:
             size = filepath.stat().st_size
@@ -435,6 +444,7 @@ def main():
     apple_result  = load_apple_photos_filenames() if not args.skip_apple else None
     apple_names: set | None  = apple_result[0] if apple_result else None
     apple_sizes: dict | None = apple_result[1] if apple_result else None
+    apple_stems: set | None  = apple_result[2] if apple_result else None
     google_idx = None if args.skip_google else load_google_filenames(config, args.refresh_cache)
 
     print()
@@ -442,7 +452,7 @@ def main():
     # ── Process each photo ────────────────────────────────────────────────────
     results = []
     for i, photo in enumerate(photos, 1):
-        apple    = check_apple(photo.name, apple_names, apple_sizes, photo) if not args.skip_apple else None
+        apple    = check_apple(photo.name, apple_names, apple_sizes, photo, apple_stems) if not args.skip_apple else None
         google   = check_google(photo.name, google_idx) if not args.skip_google else None
         onedrive = check_onedrive(photo.name, config)   if not args.skip_onedrive else None
 

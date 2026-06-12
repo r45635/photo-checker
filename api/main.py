@@ -476,13 +476,14 @@ def _check_photos_permission() -> str:
 
 _apple_cache: dict | None = None
 _sqlite_apple_names: set | None = None
+_sqlite_apple_stems: set | None = None
 
 
-def _load_sqlite_apple_names() -> set:
-    """Direct SQLite name set — same source as the scan. Cached per server lifetime."""
-    global _sqlite_apple_names
-    if _sqlite_apple_names is not None:
-        return _sqlite_apple_names
+def _load_sqlite_apple_names() -> tuple[set, set]:
+    """Direct SQLite name+stem sets — same source as the scan. Cached per server lifetime."""
+    global _sqlite_apple_names, _sqlite_apple_stems
+    if _sqlite_apple_names is not None and _sqlite_apple_stems is not None:
+        return _sqlite_apple_names, _sqlite_apple_stems
     _pc_dir = str(_BUNDLE_DIR)
     if _pc_dir not in sys.path:
         sys.path.insert(0, _pc_dir)
@@ -490,15 +491,17 @@ def _load_sqlite_apple_names() -> set:
         from photo_checker import load_apple_photos_filenames as _load_afn
         result = _load_afn()
         _sqlite_apple_names = result[0] if result else set()
+        _sqlite_apple_stems = result[2] if result else set()
     except Exception as exc:
         print(f"[apple] sqlite names load error: {exc}", file=sys.stderr)
         _sqlite_apple_names = set()
-    return _sqlite_apple_names
+        _sqlite_apple_stems = set()
+    return _sqlite_apple_names, _sqlite_apple_stems
 
 
 def _sqlite_name_found(filename: str) -> bool:
-    """Check filename against the direct SQLite index (steps 1-3 of check_apple)."""
-    names = _load_sqlite_apple_names()
+    """Check filename against the direct SQLite index (steps 1-4 of check_apple)."""
+    names, stems = _load_sqlite_apple_names()
     if not names:
         return False
     p = Path(filename)
@@ -508,6 +511,8 @@ def _sqlite_name_found(filename: str) -> bool:
     if stem_stripped != p.stem and _nfc(stem_stripped + p.suffix).lower() in names:
         return True
     if _nfc(p.stem + " - Copy" + p.suffix).lower() in names:
+        return True
+    if _nfc(p.stem).lower() in stems:
         return True
     return False
 
@@ -672,6 +677,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
         apple_result  = load_apple_photos_filenames()
         apple_names   = apple_result[0] if apple_result else None
         apple_sizes   = apple_result[1] if apple_result else None
+        apple_stems   = apple_result[2] if apple_result else None
         print()
 
         if on_progress:
@@ -679,7 +685,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
 
         results = []
         for i, photo in enumerate(photos, 1):
-            apple = check_apple(photo.name, apple_names, apple_sizes, photo)
+            apple = check_apple(photo.name, apple_names, apple_sizes, photo, apple_stems)
             found_in = ["apple_photos"] if apple is True else []
             has_error = apple is None
             safe = bool(found_in) and not has_error
@@ -813,9 +819,10 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
                 status_code=422,
                 detail=f"Photos accepted the command but did not import the file. stderr={warn!r}",
             )
-        global _apple_cache, _sqlite_apple_names
+        global _apple_cache, _sqlite_apple_names, _sqlite_apple_stems
         _apple_cache = None         # invalidate osxphotos cache
         _sqlite_apple_names = None  # invalidate SQLite cache
+        _sqlite_apple_stems = None
         return {"status": "imported", "path": str(file_path), "result": result}
     except HTTPException:
         raise
