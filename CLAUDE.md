@@ -19,7 +19,7 @@ The goal: help the user decide which local backup files are safe to delete becau
 ## Repository
 
 - GitHub: https://github.com/r45635/photo-checker (private)
-- Local: `/Users/vcruvellier/tools/photo_checker/`
+- Local: `<wherever you cloned it>/photo_checker/`
 
 ## macOS setup prerequisites
 
