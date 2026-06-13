@@ -2,7 +2,7 @@
 
 > Internal development reference. Not end-user documentation.
 
-## Project state (2026-06-13)
+## Project state (2026-06-13) — v1.1.0 Stabilization complete
 
 photo-checker is a local macOS web app (FastAPI + Next.js 14) for checking whether backup photos/videos already exist in Apple Photos. The Apple Photos flow is stable and production-ready. Google Photos and OneDrive backends exist in `photo_checker.py` but are not wired to the web API.
 
@@ -19,10 +19,13 @@ photo-checker is a local macOS web app (FastAPI + Next.js 14) for checking wheth
 | AppleScript escaping (`/api/import`) | Incomplete for special chars | Fixed → see Commit 3 |
 | Match confidence fields | No per-record confidence/reason | Fixed → see Commit 5 |
 | `CLAUDE.md` personal path | Local path exposed | Fixed → see Commit 4 |
-| `results/*.json` in git | Not tracked (`.gitignore *.json` works) | ✓ OK |
+| `results/*.json` in git | Not tracked (`.gitignore` scoped to `results/`) | ✓ OK |
 | CORS policy | Restricted to localhost:3000 only | ✓ OK |
 | UUID validation | Validated before AppleScript (`_UUID_RE`) | ✓ OK |
 | `_validate_media_path()` | Blocks system dirs + extension whitelist | ✓ OK (see note) |
+| `.gitignore` | Missing .DS_Store, node_modules/, .next/, .pytest_cache/ | Fixed |
+| GitHub Actions CI | Missing | Fixed → `.github/workflows/test.yml` |
+| Issue templates | Missing | Fixed → `.github/ISSUE_TEMPLATE/` |
 
 ## Security note: `_validate_media_path()`
 
@@ -83,8 +86,26 @@ photo_checker/
 ├── requirements.txt       Core deps
 ├── requirements-optional.txt  Google Photos / OneDrive / viewer
 ├── requirements-dev.txt   pytest, ruff
+├── .github/
+│   ├── workflows/test.yml     CI: python tests + frontend build
+│   └── ISSUE_TEMPLATE/        bug_report, false_positive, feature_request
 └── DEV_AUDIT.md           This file
 ```
+
+## v1.1.0 release checklist
+
+- [x] `pytest -v` → 54/54 passed
+- [x] `pip install -r requirements.txt -r requirements-dev.txt` succeeds from clean venv
+- [x] Frontend builds: `cd web && npm ci && npm run build`
+- [x] README does not oversell Google Photos or OneDrive
+- [x] CLAUDE.md contains no personal paths or private data
+- [x] Results include `match_confidence` and `match_reason`
+- [x] All deletions go via `send2trash` (no direct `unlink`)
+- [x] Sensitive endpoints validate paths (`_validate_media_path`)
+- [x] AppleScript path passed as argv (no injection)
+- [x] GitHub Actions CI runs on push
+- [x] `.gitignore` covers macOS, Node, Python, and secret file patterns
+- [x] Issue templates present
 
 ## Known limitations
 

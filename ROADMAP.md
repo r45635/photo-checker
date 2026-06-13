@@ -47,7 +47,7 @@ Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 
 ---
 
-## Phase 1.1 — Stabilization (IN PROGRESS)
+## Phase 1.1 — Stabilization (DONE)
 
 Making the project a clean, testable, reproducible MVP before new features.
 
@@ -60,6 +60,9 @@ Making the project a clean, testable, reproducible MVP before new features.
 - [x] 54 unit tests: copy-suffix, NFC, confidence model, path security, UUID injection
 - [x] `DEV_AUDIT.md` — audit findings, validation procedure, architecture reference
 - [x] `CLAUDE.md` personal path removed
+- [x] GitHub Actions CI (Python tests + frontend build on push)
+- [x] `.gitignore` hardened (macOS, Node, Python artifacts, secret files)
+- [x] Issue templates (bug, false positive, feature request)
 
 ---
 
