@@ -185,6 +185,14 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 **`safe_to_delete = YES`** requires: found in ≥ 1 repository AND zero check errors.  
 **`safe_to_delete = MAYBE`** = found somewhere but at least one check errored. Hovering the MAYBE badge shows an explanation.
 
+**`match_confidence`** indicates how the match was found:
+- `high` — exact filename match or SHA-1 content match
+- `medium` — copy-suffix normalization or cross-format stem match (JPG↔HEIC)
+- `none` — no match found
+- `unknown` — Apple Photos index unavailable
+
+`medium` matches are shown with an amber warning in the detail panel and in the batch-delete confirmation. Review them before bulk deletion.
+
 ---
 
 ## Key design decisions
