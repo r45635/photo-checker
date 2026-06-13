@@ -359,7 +359,9 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                   )}
                   {!appleLoading && !appleError && appleInfo === null && (
                     <p className="text-xs text-amber-400/80">
-                      Found at scan time — re-scan to recheck current status.
+                      Trouvé lors du scan mais introuvable dans la bibliothèque actuelle.
+                      Apple Photos a peut-être réorganisé la bibliothèque (merge de duplicates, suppression).
+                      Relancez un scan pour mettre à jour.
                     </p>
                   )}
                   {!appleLoading && !appleError && appleInfo !== null && (

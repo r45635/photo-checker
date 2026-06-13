@@ -27,7 +27,7 @@ def _nfc(s: str) -> str:
 
 
 _COPY_SUFFIX_RE = re.compile(
-    r'(\s*-\s*copi[ey]|\s+copi[ey]|_copi[ey]|\s*-\s*copy|\s+copy|_copy)+$',
+    r'(\s*-\s*copi[ey]|\s+copi[ey]|_copi[ey]|\s*-\s*copy|\s+copy|_copy|\s+\(\d+\))+$',
     re.IGNORECASE,
 )
 
