@@ -168,7 +168,7 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 
 **Cross-format stem matching**: iPhone Live Photos are stored in Apple Photos as HEIC but backup copies are often JPEG. `IMG_1495.JPG` matches `IMG_1495.HEIC` by comparing stems (filename without extension). This prevents false negatives for converted photos.
 
-**Copy-suffix stripping**: Files like `IMG_1234 - Copy.jpg`, `IMG_1234 - Copie.jpg`, `IMG_1234_copy.JPG` are normalized to their base name before matching. Supports English ("copy") and French ("copie") suffixes.
+**Copy-suffix stripping**: Files like `IMG_1234 - Copy.jpg`, `IMG_1234 - Copie.jpg`, `IMG_1234_copy.JPG`, and `Chloé (1).jpg` (macOS/Windows automatic copy numbering) are normalized to their base name before matching. Supports English ("copy"), French ("copie"), and numeric suffixes ` (1)`, ` (2)`, etc. This handles the case where Apple Photos merges duplicates and retains the original name without the number.
 
 **Fingerprint fallback**: for Apple Photos, the SHA-1 fingerprint stored in the Photos DB is checked as a secondary signal when the filename doesn't match (catches files that were renamed after import).
 
@@ -185,7 +185,7 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 |---|---|
 | Filename matching (not hash) | EXIF/tag edits change hashes; filenames are stable |
 | Cross-format stem matching | iPhone Live Photos saved as HEIC but backups are JPEG — same stem, different extension |
-| Copy-suffix stripping | Users make copies like "IMG_1234 - Copie.jpg"; these are the same photo |
+| Copy-suffix stripping | Users make copies like "IMG_1234 - Copie.jpg" or "Chloé (1).jpg"; these are the same photo — handles Apple Photos duplicate merge |
 | Google Photos uses a local 24 h cache | The API has no filename search; listing everything once avoids thousands of paginated API calls |
 | OneDrive uses per-file Graph search | `GET /me/drive/root/search(q='filename')` — acceptable for typical folder sizes |
 | Deletion via `send2trash` | Never permanent; files land in macOS Trash and can be restored |

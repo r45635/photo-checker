@@ -74,7 +74,7 @@ All sensitive files live **outside the repo** in `~/.photo_checker/`:
 
 1. **Filename matching, not hash** — hashes are fragile after metadata edits.
 2. **Cross-format stem matching** — `IMG_1495.JPG` matches `IMG_1495.HEIC`. iPhone Live Photos are stored as HEIC in Apple Photos but backup copies are often JPEG. `load_apple_photos_filenames()` returns a 3-tuple `(name_set, size_index, stem_set)`.
-3. **Copy-suffix stripping** — `_COPY_SUFFIX_RE` strips "- Copy", "- Copie", "_copy", "_copie" (case-insensitive, English + French) before matching. Both `photo_checker.py` and `api/main.py` share the same regex.
+3. **Copy-suffix stripping** — `_COPY_SUFFIX_RE` strips "- Copy", "- Copie", "_copy", "_copie" (case-insensitive, English + French) **and macOS/Windows numeric copy suffixes ` (1)`, ` (2)`, etc.** before matching. Both `photo_checker.py` and `api/main.py` share the same regex. Handles the Apple Photos duplicate merge scenario where the numbered variant (`Chloé (1).jpg`) is removed and the un-numbered original is kept.
 4. **Photos silent skip = already imported** — Apple Photos exits 0 with empty stdout when its perceptual AI detects a visual duplicate. The import endpoint returns HTTP 200 / `already_in_photos` in that case.
 5. **Google Photos uses a local cache** — the API has no filename search; we list all items once and cache for 24 h to avoid thousands of paginated calls on every run.
 6. **OneDrive uses per-file Graph search** — `GET /me/drive/root/search(q='filename')` — reasonable for typical folder sizes.
