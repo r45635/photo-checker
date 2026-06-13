@@ -1,4 +1,4 @@
-import type { ApplePhotoInfo, PhotoRecord, ResultFile } from "./types"
+import type { ApplePhotoInfo, ExifInfo, PhotoRecord, ResultFile } from "./types"
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
@@ -163,6 +163,15 @@ export async function openInPhotos(uuid: string): Promise<void> {
     body: JSON.stringify({ uuid }),
   })
   await throwIfNotOk(res)
+}
+
+export async function getExif(path: string): Promise<ExifInfo | null> {
+  try {
+    const r = await fetch(`${BASE}/api/exif?path=${encodeURIComponent(path)}`)
+    return r.ok ? r.json() : null
+  } catch {
+    return null
+  }
 }
 
 export async function pickFolder(): Promise<string> {

@@ -34,6 +34,25 @@ export interface ApplePhotoInfo {
   has_local_copy: boolean
 }
 
+export interface ExifInfo {
+  width: number | null
+  height: number | null
+  datetime_original: string | null
+  make: string | null
+  model: string | null
+  lens_make: string | null
+  lens_model: string | null
+  f_number: number | null
+  exposure_time: string | null
+  iso: number | null
+  focal_length: number | null
+  focal_length_35mm: number | null
+  flash: boolean | null
+  gps_lat: number | null
+  gps_lon: number | null
+  gps_alt: number | null
+}
+
 export type FilterStatus = "ALL" | "YES" | "NO" | "MAYBE"
 export type SortBy = "name" | "date" | "size" | "type"
 

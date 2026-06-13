@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon, FolderOpen } from "lucide-react"
-import type { PhotoRecord, ApplePhotoInfo } from "@/lib/types"
+import type { ApplePhotoInfo, ExifInfo, PhotoRecord } from "@/lib/types"
 import {
   thumbnailUrl,
   videoUrl,
   appleThumbnailUrl,
   getAppleInfo,
+  getExif,
   importPhoto,
   patchRecord,
   openInPhotos,
@@ -45,6 +46,31 @@ function formatDate(dateStr: string | null): string {
   }
 }
 
+function fmtExifDate(s: string | null): string | null {
+  if (!s) return null
+  // "2024-03-15T14:32:08" → "2024-03-15  14:32:08"
+  return s.replace("T", "  ")
+}
+
+function fmtExposure(s: string | null): string | null {
+  if (!s) return null
+  return s.includes("/") ? `${s} s` : `${s} s`
+}
+
+function fmtFocal(mm: number | null, mm35: number | null): string | null {
+  if (!mm && !mm35) return null
+  const base = mm ? `${mm % 1 === 0 ? mm : mm.toFixed(1)} mm` : null
+  const equiv = mm35 ? `${mm35} mm equiv.` : null
+  if (base && equiv) return `${base}  (${equiv})`
+  return base ?? equiv
+}
+
+function fmtCoord(lat: number, lon: number): string {
+  const latDir = lat >= 0 ? "N" : "S"
+  const lonDir = lon >= 0 ? "E" : "W"
+  return `${Math.abs(lat).toFixed(5)}° ${latDir},  ${Math.abs(lon).toFixed(5)}° ${lonDir}`
+}
+
 export default function DetailPanel({ record, slug, onClose, onImported }: DetailPanelProps) {
   const [appleInfo, setAppleInfo] = useState<ApplePhotoInfo | null>(null)
   const [appleLoading, setAppleLoading] = useState(false)
@@ -54,6 +80,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
   const [importError, setImportError] = useState<string | null>(null)
   const [thumbError, setThumbError] = useState(false)
   const [appleThumbError, setAppleThumbError] = useState(false)
+  const [exifInfo, setExifInfo] = useState<ExifInfo | null>(null)
 
   useEffect(() => {
     if (!record) return
@@ -79,6 +106,12 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
         })
     }
   }, [record?.filename, record?.safe_to_delete])
+
+  useEffect(() => {
+    if (!record) return
+    setExifInfo(null)
+    getExif(record.path).then(setExifInfo)
+  }, [record?.path])
 
   async function handleImport() {
     if (!record) return
@@ -196,7 +229,92 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                 </div>
               </section>
 
-              {/* Section B: Apple Photos (only if YES) */}
+              {/* Section B: EXIF / Photo Info (always, when data available) */}
+              {exifInfo && (exifInfo.width || exifInfo.datetime_original || exifInfo.make || exifInfo.gps_lat !== null) && (
+                <section>
+                  <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Photo info</p>
+                  <div className="space-y-1.5 text-xs">
+
+                    {/* Date + Resolution */}
+                    {fmtExifDate(exifInfo.datetime_original) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#4a6080]">Captured</span>
+                        <span className="text-slate-400 font-mono">{fmtExifDate(exifInfo.datetime_original)}</span>
+                      </div>
+                    )}
+                    {exifInfo.width && exifInfo.height && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#4a6080]">Resolution</span>
+                        <span className="text-slate-400">{exifInfo.width.toLocaleString()} × {exifInfo.height.toLocaleString()} px</span>
+                      </div>
+                    )}
+
+                    {/* Camera */}
+                    {(exifInfo.make || exifInfo.model) && (
+                      <div className="flex items-start justify-between gap-2 pt-1">
+                        <span className="text-[#4a6080] shrink-0">Camera</span>
+                        <span className="text-slate-400 text-right">
+                          {[exifInfo.make, exifInfo.model].filter(Boolean).join("  ")}
+                        </span>
+                      </div>
+                    )}
+                    {exifInfo.lens_model && (
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[#4a6080] shrink-0">Lens</span>
+                        <span className="text-slate-400 text-right">{exifInfo.lens_model}</span>
+                      </div>
+                    )}
+
+                    {/* Shooting parameters */}
+                    {(exifInfo.f_number || exifInfo.exposure_time || exifInfo.iso) && (
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[#4a6080]">Exposure</span>
+                        <span className="text-slate-400">
+                          {[
+                            exifInfo.f_number ? `f/${exifInfo.f_number}` : null,
+                            exifInfo.exposure_time ? fmtExposure(exifInfo.exposure_time) : null,
+                            exifInfo.iso ? `ISO ${exifInfo.iso}` : null,
+                          ].filter(Boolean).join("  ·  ")}
+                        </span>
+                      </div>
+                    )}
+                    {fmtFocal(exifInfo.focal_length, exifInfo.focal_length_35mm) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#4a6080]">Focal</span>
+                        <span className="text-slate-400">{fmtFocal(exifInfo.focal_length, exifInfo.focal_length_35mm)}</span>
+                      </div>
+                    )}
+
+                    {/* GPS */}
+                    {exifInfo.gps_lat !== null && exifInfo.gps_lon !== null && (
+                      <div className="pt-1 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[#4a6080]">Location</span>
+                          <span className="text-slate-400 font-mono text-right">
+                            {fmtCoord(exifInfo.gps_lat, exifInfo.gps_lon)}
+                            {exifInfo.gps_alt !== null && (
+                              <span className="text-slate-600">  · {exifInfo.gps_alt >= 0 ? "" : "-"}{Math.abs(exifInfo.gps_alt)} m</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex justify-end">
+                          <a
+                            href={`https://maps.apple.com/?q=${exifInfo.gps_lat},${exifInfo.gps_lon}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors duration-150"
+                          >
+                            View on map
+                            <ExternalLink size={10} />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* Section C: Apple Photos (only if YES) */}
               {record.safe_to_delete === "YES" && (
                 <section>
                   <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">
@@ -299,7 +417,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                 </section>
               )}
 
-              {/* Section C: Import CTA (only if NO) */}
+              {/* Section D: Import CTA (only if NO) */}
               {record.safe_to_delete === "NO" && (
                 <section>
                   <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">

@@ -442,6 +442,155 @@ def stream_video(path: str = Query(...)) -> FileResponse:
     )
 
 
+# ── GET /api/exif ────────────────────────────────────────────────────────────────
+
+_HEIF_REGISTERED = False
+
+
+def _rational(v) -> float | None:
+    try:
+        if hasattr(v, "numerator") and hasattr(v, "denominator"):
+            return v.numerator / v.denominator if v.denominator else None
+        if isinstance(v, tuple) and len(v) == 2:
+            return v[0] / v[1] if v[1] else None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _fmt_exposure(v) -> str | None:
+    r = _rational(v)
+    if r is None or r == 0:
+        return None
+    if r >= 1:
+        return str(int(round(r)))
+    return f"1/{round(1 / r)}"
+
+
+def _dms_to_decimal(dms: tuple, ref: str) -> float | None:
+    try:
+        d, m, s = (_rational(dms[i]) for i in range(3))
+        if d is None or m is None or s is None:
+            return None
+        dec = d + m / 60 + s / 3600
+        return -dec if ref in ("S", "W") else dec
+    except Exception:
+        return None
+
+
+def _read_exif(path: Path) -> dict:
+    global _HEIF_REGISTERED
+    if not _HEIF_REGISTERED:
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            _HEIF_REGISTERED = True
+        except ImportError:
+            pass
+
+    result: dict = {
+        "width": None, "height": None,
+        "datetime_original": None,
+        "make": None, "model": None,
+        "lens_make": None, "lens_model": None,
+        "f_number": None, "exposure_time": None,
+        "iso": None, "focal_length": None, "focal_length_35mm": None,
+        "flash": None,
+        "gps_lat": None, "gps_lon": None, "gps_alt": None,
+    }
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            result["width"], result["height"] = img.size
+            raw = img.getexif()
+
+        if not raw:
+            return result
+
+        def _s(v) -> str | None:
+            if v is None:
+                return None
+            s = str(v).strip()
+            return s or None
+
+        result["make"] = _s(raw.get(271))
+        result["model"] = _s(raw.get(272))
+
+        exif_ifd = raw.get_ifd(0x8769)
+        if exif_ifd:
+            dt = exif_ifd.get(36867) or raw.get(306)
+            if dt:
+                s = str(dt).strip()
+                if len(s) >= 19:
+                    # "2024:03:15 14:32:08" → "2024-03-15T14:32:08"
+                    result["datetime_original"] = (
+                        s[:4] + "-" + s[5:7] + "-" + s[8:10] + "T" + s[11:19]
+                    )
+
+            fn = exif_ifd.get(33437)
+            if fn is not None:
+                v = _rational(fn)
+                if v is not None:
+                    result["f_number"] = round(v, 2)
+
+            et = exif_ifd.get(33434)
+            if et is not None:
+                result["exposure_time"] = _fmt_exposure(et)
+
+            iso = exif_ifd.get(34855)
+            if iso is not None:
+                result["iso"] = int(iso)
+
+            fl = exif_ifd.get(37386)
+            if fl is not None:
+                v = _rational(fl)
+                if v is not None:
+                    result["focal_length"] = round(v, 2)
+
+            fl35 = exif_ifd.get(41989)
+            if fl35 is not None:
+                result["focal_length_35mm"] = int(fl35)
+
+            flash = exif_ifd.get(37385)
+            if flash is not None:
+                result["flash"] = bool(int(flash) & 1)
+
+            result["lens_make"] = _s(exif_ifd.get(42035))
+            result["lens_model"] = _s(exif_ifd.get(42036))
+
+        gps_ifd = raw.get_ifd(0x8825)
+        if gps_ifd:
+            lat_ref = gps_ifd.get(1)
+            lat = gps_ifd.get(2)
+            lon_ref = gps_ifd.get(3)
+            lon = gps_ifd.get(4)
+            if lat and lon and lat_ref and lon_ref:
+                result["gps_lat"] = _dms_to_decimal(lat, str(lat_ref))
+                result["gps_lon"] = _dms_to_decimal(lon, str(lon_ref))
+
+            alt_ref = gps_ifd.get(5)
+            alt = gps_ifd.get(6)
+            if alt is not None:
+                v = _rational(alt)
+                if v is not None:
+                    if alt_ref is not None and int(alt_ref) == 1:
+                        v = -v
+                    result["gps_alt"] = round(v, 1)
+
+    except Exception:
+        pass
+
+    return result
+
+
+@app.get("/api/exif")
+def get_exif(path: str = Query(...)) -> dict:
+    """Return EXIF / image metadata for a local media file."""
+    p = _validate_media_path(path)
+    return _read_exif(p)
+
+
 # ── GET /api/apple-thumbnail ─────────────────────────────────────────────────────
 
 @app.get("/api/apple-thumbnail")
