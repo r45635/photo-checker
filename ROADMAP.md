@@ -110,7 +110,8 @@ Making the project a clean, testable, reproducible MVP before new features.
 - [ ] Settings screen (API credentials, cache management)
 - [ ] Export filtered results as CSV
 - [ ] Dark/light mode
-- [ ] Packaged macOS app (PyInstaller + Next.js static bundle)
+- [x] Packaged macOS app (PyInstaller + Next.js static bundle) — `build.sh` + `photo_checker.spec`
+- [ ] Signed and notarized macOS app (requires Apple Developer Program)
 
 ---
 

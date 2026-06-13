@@ -143,6 +143,45 @@ cd web && npm run dev                        # UI on :3000 → open http://local
 
 ---
 
+## Standalone macOS app (optional)
+
+`build.sh` packages the app into a self-contained `Photo Checker.app` using PyInstaller and the pre-built Next.js static export. No Python or Node.js required to run the resulting app.
+
+### Build prerequisites
+
+- Python venv activated with `requirements.txt` installed
+- Node.js 18+ (needed at build time only)
+
+### Build
+
+```bash
+./build.sh
+# → dist/Photo Checker.app
+```
+
+### First launch (Gatekeeper)
+
+The app is **not signed or notarized**. On first launch macOS will block it. To open it:
+
+1. In Finder, right-click **Photo Checker.app** → **Open**
+2. Click **Open** in the dialog
+
+This only needs to be done once.
+
+### Full Disk Access for the app
+
+The bundled app still needs Full Disk Access to read the Apple Photos library:
+
+1. **System Settings → Privacy & Security → Full Disk Access**
+2. Add **Photo Checker** to the list
+3. Relaunch the app
+
+### Usage
+
+Double-click `Photo Checker.app` — it starts the backend and opens `http://localhost:8000` automatically.
+
+---
+
 ## Usage
 
 1. Click **Scan folder** → pick a folder path → optionally enable **Include subfolders** → **Scan**  
