@@ -13,6 +13,9 @@ export interface PhotoRecord {
   match_confidence?: "high" | "medium" | "none" | "unknown"
   match_reason?: string
   is_cloud_only?: boolean
+  datetime_original?: string | null
+  has_gps?: boolean
+  has_camera?: boolean
 }
 
 export interface ResultFile {
@@ -62,6 +65,24 @@ export interface ExifInfo {
 
 export type FilterStatus = "ALL" | "YES" | "NO" | "MAYBE"
 export type SortBy = "name" | "date" | "size" | "type"
+
+export interface AdvancedFilters {
+  dateFrom: string | null
+  dateTo: string | null
+  gps: "all" | "with" | "without"
+  camera: "all" | "with" | "without"
+  sizeRange: "all" | "xs" | "sm" | "md" | "lg"
+  resolution: "all" | "low" | "hd" | "4k"
+}
+
+export const DEFAULT_ADVANCED_FILTERS: AdvancedFilters = {
+  dateFrom: null,
+  dateTo: null,
+  gps: "all",
+  camera: "all",
+  sizeRange: "all",
+  resolution: "all",
+}
 
 export interface BatchAction {
   type: "delete" | "import" | "force_delete" | "move"

@@ -10,8 +10,10 @@ import ScanDialog from "@/components/ScanDialog"
 import Toast from "@/components/Toast"
 import LogPanel from "@/components/LogPanel"
 import Lightbox from "@/components/Lightbox"
+import AdvancedFilterModal from "@/components/AdvancedFilterModal"
 import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
-import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
+import type { AdvancedFilters, FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
+import { DEFAULT_ADVANCED_FILTERS } from "@/lib/types"
 
 export default function HomePage() {
   // ── Core state ─────────────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ export default function HomePage() {
   const [toast, setToast] = useState<string | null>(null)
   const [showLogs, setShowLogs] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [advFilters, setAdvFilters] = useState<AdvancedFilters>(DEFAULT_ADVANCED_FILTERS)
+  const [showAdvFilters, setShowAdvFilters] = useState(false)
 
   // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -76,18 +80,48 @@ export default function HomePage() {
       .finally(() => setLoading(false))
   }, [selectedSlug])
 
-  // ── Derived: pre-subfolder filtered (status + search only) ────────────────
+  // ── Derived: pre-subfolder filtered (status + search + advanced) ──────────
   const preSubfiltered = useMemo<PhotoRecord[]>(() => {
-    let list = records
-    if (filterStatus !== "ALL") {
-      list = list.filter((r) => r.safe_to_delete === filterStatus)
+    const SIZE_RANGES: Record<string, [number, number]> = {
+      xs: [0, 500],
+      sm: [500, 5000],
+      md: [5000, 25000],
+      lg: [25000, Infinity],
     }
-    if (search.trim()) {
-      const lower = search.trim().toLowerCase()
-      list = list.filter((r) => r.filename.toLowerCase().includes(lower))
-    }
-    return list
-  }, [records, filterStatus, search])
+    return records.filter((r) => {
+      if (filterStatus !== "ALL" && r.safe_to_delete !== filterStatus) return false
+      if (search.trim()) {
+        const lower = search.trim().toLowerCase()
+        if (!r.filename.toLowerCase().includes(lower)) return false
+      }
+      // Date range
+      if (advFilters.dateFrom && r.datetime_original) {
+        if (r.datetime_original < advFilters.dateFrom) return false
+      }
+      if (advFilters.dateTo && r.datetime_original) {
+        if (r.datetime_original > advFilters.dateTo) return false
+      }
+      // GPS
+      if (advFilters.gps === "with" && !r.has_gps) return false
+      if (advFilters.gps === "without" && r.has_gps) return false
+      // Camera
+      if (advFilters.camera === "with" && !r.has_camera) return false
+      if (advFilters.camera === "without" && r.has_camera) return false
+      // Size
+      if (advFilters.sizeRange !== "all") {
+        const [lo, hi] = SIZE_RANGES[advFilters.sizeRange]
+        if (r.size_kb < lo || r.size_kb >= hi) return false
+      }
+      // Resolution
+      if (advFilters.resolution !== "all" && r.width && r.height) {
+        const mp = (r.width * r.height) / 1_000_000
+        if (advFilters.resolution === "low" && mp >= 2) return false
+        if (advFilters.resolution === "hd" && (mp < 2 || mp >= 8)) return false
+        if (advFilters.resolution === "4k" && mp < 8) return false
+      }
+      return true
+    })
+  }, [records, filterStatus, search, advFilters])
 
   // ── Derived: subfolderMap (counts reflect current status+search filter) ────
   const subfolderMap = useMemo<Map<string, number>>(() => {
@@ -176,8 +210,18 @@ export default function HomePage() {
     return m
   }, [filtered])
 
+  // ── Active advanced filter count (for badge) ──────────────────────────────
+  const activeAdvFilterCount = [
+    advFilters.dateFrom !== null,
+    advFilters.dateTo !== null,
+    advFilters.gps !== "all",
+    advFilters.camera !== "all",
+    advFilters.sizeRange !== "all",
+    advFilters.resolution !== "all",
+  ].filter(Boolean).length
+
   // ── Reset visibleCount only when filter/sort params change (not on import/delete) ──
-  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc) + String(groupByFolder)
+  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc) + String(groupByFolder) + JSON.stringify(advFilters)
   const prevFilterKey = useRef(filterKey)
   if (prevFilterKey.current !== filterKey) {
     prevFilterKey.current = filterKey
@@ -484,6 +528,8 @@ export default function HomePage() {
         onOpenFinderResult={handleOpenFinderResult}
         onDeleteResult={handleDeleteResult}
         onShowLogs={() => setShowLogs(true)}
+        onOpenAdvFilters={() => setShowAdvFilters(true)}
+        activeAdvFilterCount={activeAdvFilterCount}
         stats={stats}
       />
 
@@ -671,6 +717,15 @@ export default function HomePage() {
 
       {/* Toast */}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+
+      {/* Advanced filter modal */}
+      {showAdvFilters && (
+        <AdvancedFilterModal
+          filters={advFilters}
+          onChange={setAdvFilters}
+          onClose={() => setShowAdvFilters(false)}
+        />
+      )}
 
       {/* Log panel */}
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}

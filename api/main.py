@@ -945,16 +945,29 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                 "match_confidence":  apple_confidence,
                 "match_reason":      apple_reason,
                 "is_cloud_only":     is_cloud_only,
+                "datetime_original": None,
+                "has_gps":           False,
+                "has_camera":        False,
                 "width":             None,
                 "height":            None,
             }
-            # Quick header-only dimension read for resolution indicator
+            # Quick header-only dimension + EXIF read
             try:
                 ext = photo.suffix.lower()
                 if ext in _IMAGE_EXTS_SET:
                     from PIL import Image as _Img
                     with _Img.open(photo) as _im:
                         record["width"], record["height"] = _im.size
+                        try:
+                            exif_raw = _im._getexif() or {}  # type: ignore[attr-defined]
+                            dt_str = exif_raw.get(36867)
+                            if dt_str and len(dt_str) >= 10:
+                                record["datetime_original"] = dt_str[:10].replace(":", "-")
+                            gps = exif_raw.get(34853) or {}
+                            record["has_gps"] = bool(gps.get(2) and gps.get(4))
+                            record["has_camera"] = bool(exif_raw.get(271) or exif_raw.get(272))
+                        except Exception:
+                            pass
             except Exception:
                 pass
             results.append(record)

@@ -9,6 +9,7 @@ REQUIRED_RECORD_FIELDS = {
     "found_in", "safe_to_delete",
     "match_confidence", "match_reason",
     "is_cloud_only",
+    "datetime_original", "has_gps", "has_camera",
     "width", "height",
 }
 
@@ -26,6 +27,9 @@ def make_record(**overrides) -> dict:
         "match_confidence": "high",
         "match_reason": "Exact filename match",
         "is_cloud_only": False,
+        "datetime_original": None,
+        "has_gps": False,
+        "has_camera": False,
         "width": None,
         "height": None,
     }

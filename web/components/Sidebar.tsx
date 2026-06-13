@@ -15,6 +15,7 @@ import {
   Trash2,
   Info,
   ScrollText,
+  SlidersHorizontal,
 } from "lucide-react"
 import type { FilterStatus, ResultFile, SortBy } from "@/lib/types"
 
@@ -40,6 +41,8 @@ interface SidebarProps {
   onOpenFinderResult: (folder: string) => void
   onDeleteResult: (slug: string) => void
   onShowLogs: () => void
+  onOpenAdvFilters: () => void
+  activeAdvFilterCount: number
   stats: { total: number; yes: number; no: number; maybe: number; yesMB: number }
 }
 
@@ -192,6 +195,8 @@ export default function Sidebar({
   onOpenFinderResult,
   onDeleteResult,
   onShowLogs,
+  onOpenAdvFilters,
+  activeAdvFilterCount,
   stats,
 }: SidebarProps) {
   const [infoResult, setInfoResult] = useState<ResultFile | null>(null)
@@ -368,6 +373,28 @@ export default function Sidebar({
               )
             })}
           </div>
+          <button
+            onClick={onOpenAdvFilters}
+            className="mt-2 w-full flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors duration-150"
+            style={{
+              background: activeAdvFilterCount > 0 ? "#1a3a5c" : "transparent",
+              color: activeAdvFilterCount > 0 ? "#60a5fa" : "#4a6080",
+              border: `1px solid ${activeAdvFilterCount > 0 ? "#3b82f6" : "#1a2840"}`,
+            }}
+            onMouseEnter={(e) => { if (activeAdvFilterCount === 0) e.currentTarget.style.color = "#94a3b8" }}
+            onMouseLeave={(e) => { if (activeAdvFilterCount === 0) e.currentTarget.style.color = "#4a6080" }}
+          >
+            <SlidersHorizontal size={11} />
+            <span className="flex-1 text-left">Advanced filters</span>
+            {activeAdvFilterCount > 0 && (
+              <span
+                className="rounded-full px-1.5 text-[10px] font-semibold"
+                style={{ background: "#3b82f6", color: "#fff" }}
+              >
+                {activeAdvFilterCount}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* ── Search ── */}
