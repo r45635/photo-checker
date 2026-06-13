@@ -1,9 +1,8 @@
 osxphotos
-google-auth-oauthlib
-google-auth-httplib2
-msal
-requests
 send2trash
-streamlit
 pillow
 pillow-heif
+fastapi
+uvicorn[standard]
+python-multipart
+requests

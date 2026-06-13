@@ -93,10 +93,18 @@ cd photo-checker
 
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt        # FastAPI, osxphotos, Pillow, send2trash, …
+pip install -r requirements.txt          # core: FastAPI, osxphotos, Pillow, send2trash, …
+# pip install -r requirements-optional.txt  # optional: Google Photos, OneDrive, Streamlit viewer
 
-cd web && npm install && npm run build # Build frontend
+cd web && npm install && npm run build   # Build frontend
 cd ..
+```
+
+### Validate the install (optional)
+
+```bash
+pip install -r requirements-dev.txt  # pytest, ruff
+pytest -v
 ```
 
 ### Config (for Google Photos / OneDrive)

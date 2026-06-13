@@ -1,0 +1,8 @@
+# Optional dependencies for Google Photos, OneDrive, and the legacy Streamlit viewer.
+# Install only if you need these features:
+#   pip install -r requirements-optional.txt
+google-auth-oauthlib
+google-auth-httplib2
+msal
+streamlit
+pandas
