@@ -889,6 +889,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
         scan_folder as _scan_folder,
         load_apple_photos_filenames,
         check_apple,
+        _check_apple_detail,
         status_label,
     )
 
@@ -910,21 +911,26 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
 
         results = []
         for i, photo in enumerate(photos, 1):
-            apple = check_apple(photo.name, apple_names, apple_sizes, photo, apple_stems)
+            apple, apple_confidence, apple_reason = _check_apple_detail(
+                photo.name, apple_names,
+                stem_idx=apple_stems, size_idx=apple_sizes, filepath=photo,
+            )
             found_in = ["apple_photos"] if apple is True else []
             has_error = apple is None
             safe = bool(found_in) and not has_error
             record = {
-                "filename":       photo.name,
-                "path":           str(photo),
-                "size_kb":        round(photo.stat().st_size / 1024, 1),
-                "apple_photos":   status_label(apple, False),
-                "google_photos":  "skipped",
-                "onedrive":       "skipped",
-                "found_in":       ", ".join(found_in) if found_in else "—",
-                "safe_to_delete": "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
-                "width":          None,
-                "height":         None,
+                "filename":          photo.name,
+                "path":              str(photo),
+                "size_kb":           round(photo.stat().st_size / 1024, 1),
+                "apple_photos":      status_label(apple, False),
+                "google_photos":     "skipped",
+                "onedrive":          "skipped",
+                "found_in":          ", ".join(found_in) if found_in else "—",
+                "safe_to_delete":    "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
+                "match_confidence":  apple_confidence,
+                "match_reason":      apple_reason,
+                "width":             None,
+                "height":            None,
             }
             # Quick header-only dimension read for resolution indicator
             try:

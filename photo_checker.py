@@ -172,28 +172,36 @@ def load_apple_photos_filenames() -> tuple[set, dict, set] | None:
         return None
 
 
-def check_apple(filename: str, name_idx: set | None,
-                size_idx: dict | None = None,
-                filepath: Path | None = None,
-                stem_idx: set | None = None) -> bool | None:
+def _check_apple_detail(
+    filename: str,
+    name_idx: set | None,
+    stem_idx: set | None = None,
+    size_idx: dict | None = None,
+    filepath: Path | None = None,
+) -> tuple[bool | None, str, str]:
+    """Like check_apple() but also returns (confidence, human-readable reason).
+
+    confidence: "high" | "medium" | "none" | "unknown"
+    reason: short English description of how the match was determined.
+    """
     if name_idx is None:
-        return None
+        return None, "unknown", "Apple Photos index unavailable"
     p = Path(filename)
     # 1. Exact name match
     if _nfc(filename).lower() in name_idx:
-        return True
-    # 2. Backup has " - Copy" → Apple Photos stripped it
+        return True, "high", "Exact filename match"
+    # 2. Backup has copy suffix → Apple Photos has the original
     stem_stripped = _strip_copy_suffix(p.stem)
     if stem_stripped != p.stem:
         if _nfc(stem_stripped + p.suffix).lower() in name_idx:
-            return True
-    # 3. Backup has no " - Copy" → Apple Photos added it on import
+            return True, "medium", "Filename match after stripping copy suffix"
+    # 3. Backup has no copy suffix → Apple Photos added one on import
     if _nfc(p.stem + " - Copy" + p.suffix).lower() in name_idx:
-        return True
+        return True, "medium", "Matched reverse copy suffix"
     # 4. Cross-format stem match: IMG_1495.JPG → IMG_1495.HEIC (iPhone Live Photo)
     if stem_idx is not None and _nfc(p.stem).lower() in stem_idx:
-        return True
-    # 5. SHA1 fallback: match by file size then content
+        return True, "medium", "Stem match (format conversion, e.g. JPG↔HEIC)"
+    # 5. SHA-1 fallback: match by file size then content
     if size_idx and filepath and filepath.is_file():
         try:
             size = filepath.stat().st_size
@@ -206,10 +214,19 @@ def check_apple(filename: str, name_idx: set | None,
                     for uuid, ext in candidates:
                         lib_file = originals / uuid[0] / f"{uuid}{ext}"
                         if lib_file.exists() and _file_sha1(lib_file) == backup_sha1:
-                            return True
+                            return True, "high", "File content match (SHA-1)"
         except Exception:
             pass
-    return False
+    return False, "none", "No match found"
+
+
+def check_apple(filename: str, name_idx: set | None,
+                size_idx: dict | None = None,
+                filepath: Path | None = None,
+                stem_idx: set | None = None) -> bool | None:
+    return _check_apple_detail(
+        filename, name_idx, stem_idx=stem_idx, size_idx=size_idx, filepath=filepath
+    )[0]
 
 # ── Google Photos ──────────────────────────────────────────────────────────────
 

@@ -364,6 +364,12 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                       Relancez un scan pour mettre à jour.
                     </p>
                   )}
+                  {record.match_confidence === "medium" && (
+                    <p className="text-xs text-amber-400/70 mt-1">
+                      Correspondance indirecte : {record.match_reason?.toLowerCase()}.
+                      Vérifiez avant de supprimer.
+                    </p>
+                  )}
                   {!appleLoading && !appleError && appleInfo !== null && (
                     <div className="flex flex-col gap-3">
                       {/* Apple thumbnail — only when we have a UUID (osxphotos found it) */}

@@ -155,6 +155,15 @@ export default function BatchBar({
                 <p className="mb-4 text-xs text-[#4a6080]">
                   Recoverable from macOS Trash.
                 </p>
+                {canDelete.some(r => r.match_confidence === "medium") && (
+                  <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-900/30 px-3 py-2 text-xs text-amber-400">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      Some files were matched indirectly (copy suffix or format conversion).
+                      Review before deleting.
+                    </span>
+                  </div>
+                )}
                 <FilenameList records={canDelete} />
                 {confirmState.progress !== null && (
                   <div className="mt-4">

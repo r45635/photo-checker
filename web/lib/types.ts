@@ -10,6 +10,8 @@ export interface PhotoRecord {
   _subfolder: string        // "" for root level files
   width?: number | null
   height?: number | null
+  match_confidence?: "high" | "medium" | "none" | "unknown"
+  match_reason?: string
 }
 
 export interface ResultFile {
