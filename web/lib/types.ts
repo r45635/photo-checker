@@ -8,6 +8,8 @@ export interface PhotoRecord {
   found_in: string          // "apple_photos" | "google_photos" | "onedrive" | ""
   safe_to_delete: "YES" | "NO" | "MAYBE"
   _subfolder: string        // "" for root level files
+  width?: number | null
+  height?: number | null
 }
 
 export interface ResultFile {
@@ -51,6 +53,8 @@ export interface ExifInfo {
   gps_lat: number | null
   gps_lon: number | null
   gps_alt: number | null
+  duration_sec: number | null
+  codec: string | null
 }
 
 export type FilterStatus = "ALL" | "YES" | "NO" | "MAYBE"

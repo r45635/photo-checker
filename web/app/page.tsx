@@ -9,6 +9,7 @@ import BatchBar from "@/components/BatchBar"
 import ScanDialog from "@/components/ScanDialog"
 import Toast from "@/components/Toast"
 import LogPanel from "@/components/LogPanel"
+import Lightbox from "@/components/Lightbox"
 import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
 import type { FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
 
@@ -34,6 +35,7 @@ export default function HomePage() {
   const [visibleCount, setVisibleCount] = useState(32)
   const [toast, setToast] = useState<string | null>(null)
   const [showLogs, setShowLogs] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   // ── Infinite scroll sentinel & shift-click tracking ───────────────────────
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -204,6 +206,7 @@ export default function HomePage() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName
       if (tag === "INPUT" || tag === "TEXTAREA") return
+      if (lightboxIndex !== null) return   // lightbox handles its own keys
 
       if (e.key === "Escape") {
         if (detail) { setDetail(null); return }
@@ -240,7 +243,15 @@ export default function HomePage() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [detail, filtered, filteredIndexMap, batch])
+  }, [detail, filtered, filteredIndexMap, batch, lightboxIndex])
+
+  // ── Lightbox ───────────────────────────────────────────────────────────────
+  const lightboxPaths = useMemo(() => filtered.map((r) => r.path), [filtered])
+
+  function handleOpenLightbox(path: string) {
+    const idx = filteredIndexMap.get(path)
+    if (idx !== undefined) setLightboxIndex(idx)
+  }
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleSelect(path: string) {
@@ -605,6 +616,7 @@ export default function HomePage() {
                       onSelect={handleSelect}
                       onShiftSelect={handleShiftSelect}
                       onView={handleView}
+                      onOpenLightbox={() => handleOpenLightbox(r.path)}
                       thumbnailUrl={thumbnailUrl(r.path)}
                     />
                   )
@@ -634,6 +646,7 @@ export default function HomePage() {
         slug={selectedSlug ?? ""}
         onClose={handleClose}
         onImported={handleImported}
+        onOpenLightbox={handleOpenLightbox}
       />
 
       {/* Batch bar */}
@@ -661,6 +674,16 @@ export default function HomePage() {
 
       {/* Log panel */}
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
+
+      {/* Lightbox */}
+      {lightboxIndex !== null && (
+        <Lightbox
+          paths={lightboxPaths}
+          index={lightboxIndex}
+          onChangeIndex={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   )
 }

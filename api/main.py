@@ -444,7 +444,41 @@ def stream_video(path: str = Query(...)) -> FileResponse:
 
 # ── GET /api/exif ────────────────────────────────────────────────────────────────
 
+_VIDEO_EXTS_SET = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm'}
+_IMAGE_EXTS_SET = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif', '.heic', '.heif'}
+
 _HEIF_REGISTERED = False
+
+
+def _read_video_meta_into(path: Path, result: dict) -> None:
+    """Populate width/height/duration_sec/codec from macOS mdls (Spotlight)."""
+    try:
+        cmd = ['mdls',
+               '-name', 'kMDItemDurationSeconds',
+               '-name', 'kMDItemPixelWidth',
+               '-name', 'kMDItemPixelHeight',
+               '-name', 'kMDItemCodecs',
+               str(path)]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
+        for line in out.splitlines():
+            if '=' not in line:
+                continue
+            k, _, v = line.partition(' = ')
+            k, v = k.strip(), v.strip()
+            if v == '(null)':
+                continue
+            if k == 'kMDItemDurationSeconds':
+                result['duration_sec'] = round(float(v), 1)
+            elif k == 'kMDItemPixelWidth':
+                result['width'] = int(v)
+            elif k == 'kMDItemPixelHeight':
+                result['height'] = int(v)
+            elif k == 'kMDItemCodecs':
+                codecs = re.findall(r'"([^"]+)"', v)
+                if codecs:
+                    result['codec'] = codecs[0]
+    except Exception:
+        pass
 
 
 def _rational(v) -> float | None:
@@ -497,7 +531,13 @@ def _read_exif(path: Path) -> dict:
         "iso": None, "focal_length": None, "focal_length_35mm": None,
         "flash": None,
         "gps_lat": None, "gps_lon": None, "gps_alt": None,
+        "duration_sec": None, "codec": None,
     }
+
+    if path.suffix.lower() in _VIDEO_EXTS_SET:
+        _read_video_meta_into(path, result)
+        return result
+
     try:
         from PIL import Image
 
@@ -874,7 +914,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
             found_in = ["apple_photos"] if apple is True else []
             has_error = apple is None
             safe = bool(found_in) and not has_error
-            results.append({
+            record = {
                 "filename":       photo.name,
                 "path":           str(photo),
                 "size_kb":        round(photo.stat().st_size / 1024, 1),
@@ -883,7 +923,19 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                 "onedrive":       "skipped",
                 "found_in":       ", ".join(found_in) if found_in else "—",
                 "safe_to_delete": "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
-            })
+                "width":          None,
+                "height":         None,
+            }
+            # Quick header-only dimension read for resolution indicator
+            try:
+                ext = photo.suffix.lower()
+                if ext in _IMAGE_EXTS_SET:
+                    from PIL import Image as _Img
+                    with _Img.open(photo) as _im:
+                        record["width"], record["height"] = _im.size
+            except Exception:
+                pass
+            results.append(record)
             icon = "OK" if safe else ("?" if found_in and has_error else "NO")
             print(f"[{i:>4}/{len(photos)}] [{icon}] {photo.name}")
             if on_progress:

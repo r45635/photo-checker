@@ -12,6 +12,7 @@ export interface PhotoCardProps {
   onSelect: (path: string) => void
   onShiftSelect: (index: number) => void
   onView: (record: PhotoRecord) => void
+  onOpenLightbox: () => void
   thumbnailUrl: string
 }
 
@@ -32,6 +33,14 @@ function formatMB(sizeKb: number): string {
   return (sizeKb / 1024).toFixed(1) + " MB"
 }
 
+function resolutionBadge(record: PhotoRecord): { color: string; mp: string; tip: string } | null {
+  if (!record.width || !record.height) return null
+  const mp = (record.width * record.height) / 1_000_000
+  if (mp < 1)   return { color: "#ef4444", mp: `${mp.toFixed(1)}MP`, tip: `Very low resolution: ${record.width}×${record.height} px` }
+  if (mp < 2.5) return { color: "#f97316", mp: `${mp.toFixed(1)}MP`, tip: `Low resolution: ${record.width}×${record.height} px` }
+  return null
+}
+
 export default function PhotoCard({
   record,
   index,
@@ -39,10 +48,12 @@ export default function PhotoCard({
   onSelect,
   onShiftSelect,
   onView,
+  onOpenLightbox,
   thumbnailUrl,
 }: PhotoCardProps) {
   const [imgError, setImgError] = useState(false)
   const video = isVideo(record.filename)
+  const badge = resolutionBadge(record)
 
   return (
     <div
@@ -55,6 +66,7 @@ export default function PhotoCard({
         selected && "ring-2 ring-blue-500 ring-offset-1 ring-offset-[#060a10]"
       )}
       onClick={() => onView(record)}
+      onDoubleClick={() => onOpenLightbox()}
       title={record.safe_to_delete === "MAYBE" ? "Found in at least one source but a check errored — verify before deleting" : undefined}
     >
       {/* Thumbnail */}
@@ -73,11 +85,23 @@ export default function PhotoCard({
           />
         )}
 
-        {/* Video badge — always visible */}
+        {/* Video badge */}
         {video && (
           <div className="absolute bottom-2 right-2 pointer-events-none">
             <div className="w-6 h-6 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
               <Film size={12} className="text-white/70" />
+            </div>
+          </div>
+        )}
+
+        {/* Resolution badge — only for low/very-low res images */}
+        {badge && (
+          <div className="absolute bottom-2 left-2 pointer-events-none" title={badge.tip}>
+            <div
+              className="rounded px-1 py-0.5 text-[9px] font-bold text-white leading-none"
+              style={{ background: badge.color, opacity: 0.9 }}
+            >
+              {badge.mp}
             </div>
           </div>
         )}

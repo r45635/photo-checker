@@ -21,6 +21,7 @@ interface DetailPanelProps {
   slug: string
   onClose: () => void
   onImported: (path: string) => void
+  onOpenLightbox?: (path: string) => void
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -44,6 +45,14 @@ function formatDate(dateStr: string | null): string {
   } catch {
     return dateStr
   }
+}
+
+function fmtDuration(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = Math.floor(sec % 60)
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+  return `${m}:${String(s).padStart(2, "0")}`
 }
 
 function fmtExifDate(s: string | null): string | null {
@@ -71,7 +80,7 @@ function fmtCoord(lat: number, lon: number): string {
   return `${Math.abs(lat).toFixed(5)}° ${latDir},  ${Math.abs(lon).toFixed(5)}° ${lonDir}`
 }
 
-export default function DetailPanel({ record, slug, onClose, onImported }: DetailPanelProps) {
+export default function DetailPanel({ record, slug, onClose, onImported, onOpenLightbox }: DetailPanelProps) {
   const [appleInfo, setAppleInfo] = useState<ApplePhotoInfo | null>(null)
   const [appleLoading, setAppleLoading] = useState(false)
   const [appleError, setAppleError] = useState(false)
@@ -202,7 +211,12 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                 <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">
                   Backup copy
                 </p>
-                <div className="rounded-xl overflow-hidden bg-[#080e1a] aspect-video flex items-center justify-center">
+                <div
+                  className="rounded-xl overflow-hidden bg-[#080e1a] aspect-video flex items-center justify-center"
+                  style={{ cursor: onOpenLightbox ? "zoom-in" : undefined }}
+                  onDoubleClick={() => onOpenLightbox?.(record.path)}
+                  title={onOpenLightbox ? "Double-click to view full screen" : undefined}
+                >
                   {isVideo(record.path) ? (
                     <VideoPlayer
                       videoSrc={videoUrl(record.path)}
@@ -230,7 +244,7 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
               </section>
 
               {/* Section B: EXIF / Photo Info (always, when data available) */}
-              {exifInfo && (exifInfo.width || exifInfo.datetime_original || exifInfo.make || exifInfo.gps_lat !== null) && (
+              {exifInfo && (exifInfo.width || exifInfo.datetime_original || exifInfo.make || exifInfo.gps_lat !== null || exifInfo.duration_sec !== null) && (
                 <section>
                   <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Photo info</p>
                   <div className="space-y-1.5 text-xs">
@@ -282,6 +296,20 @@ export default function DetailPanel({ record, slug, onClose, onImported }: Detai
                       <div className="flex items-center justify-between">
                         <span className="text-[#4a6080]">Focal</span>
                         <span className="text-slate-400">{fmtFocal(exifInfo.focal_length, exifInfo.focal_length_35mm)}</span>
+                      </div>
+                    )}
+
+                    {/* Video-specific */}
+                    {exifInfo.duration_sec !== null && (
+                      <div className="flex items-center justify-between pt-1">
+                        <span className="text-[#4a6080]">Duration</span>
+                        <span className="text-slate-400 font-mono">{fmtDuration(exifInfo.duration_sec)}</span>
+                      </div>
+                    )}
+                    {exifInfo.codec && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#4a6080]">Codec</span>
+                        <span className="text-slate-400">{exifInfo.codec}</span>
                       </div>
                     )}
 
