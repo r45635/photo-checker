@@ -918,6 +918,13 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
             found_in = ["apple_photos"] if apple is True else []
             has_error = apple is None
             safe = bool(found_in) and not has_error
+            is_cloud_only = False
+            if apple is True:
+                apple_photo_obj = _find_apple_photo(photo.name, backup_path=str(photo))
+                if apple_photo_obj is not None:
+                    is_cloud_only = bool(apple_photo_obj.iscloudasset) and not bool(
+                        apple_photo_obj.path and Path(apple_photo_obj.path).exists()
+                    )
             record = {
                 "filename":          photo.name,
                 "path":              str(photo),
@@ -929,6 +936,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                 "safe_to_delete":    "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
                 "match_confidence":  apple_confidence,
                 "match_reason":      apple_reason,
+                "is_cloud_only":     is_cloud_only,
                 "width":             None,
                 "height":            None,
             }
@@ -1088,6 +1096,8 @@ def patch_record(body: PatchBody) -> dict[str, str]:
     for rec in records:
         if rec.get("filename") == body.filename:
             rec["apple_photos"] = "yes"
+            rec["match_confidence"] = "high"
+            rec["match_reason"] = "Explicitly imported to Apple Photos"
             # Recompute found_in
             repos = []
             for field in ("apple_photos", "google_photos", "onedrive"):

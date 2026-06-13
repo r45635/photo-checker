@@ -12,6 +12,7 @@ export interface PhotoRecord {
   height?: number | null
   match_confidence?: "high" | "medium" | "none" | "unknown"
   match_reason?: string
+  is_cloud_only?: boolean
 }
 
 export interface ResultFile {

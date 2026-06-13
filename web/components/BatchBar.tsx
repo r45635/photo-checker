@@ -155,6 +155,14 @@ export default function BatchBar({
                 <p className="mb-4 text-xs text-[#4a6080]">
                   Recoverable from macOS Trash.
                 </p>
+                {canDelete.some(r => r.is_cloud_only) && (
+                  <div className="mb-3 flex items-start gap-2 rounded-lg bg-orange-900/30 px-3 py-2 text-xs text-orange-400">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      {canDelete.filter(r => r.is_cloud_only).length} file(s) are stored in iCloud only — no local copy in the Photos library. Verify iCloud sync before deleting.
+                    </span>
+                  </div>
+                )}
                 {canDelete.some(r => r.match_confidence === "medium") && (
                   <div className="mb-3 flex items-start gap-2 rounded-lg bg-amber-900/30 px-3 py-2 text-xs text-amber-400">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" />

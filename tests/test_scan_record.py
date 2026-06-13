@@ -8,6 +8,7 @@ REQUIRED_RECORD_FIELDS = {
     "apple_photos", "google_photos", "onedrive",
     "found_in", "safe_to_delete",
     "match_confidence", "match_reason",
+    "is_cloud_only",
     "width", "height",
 }
 
@@ -24,6 +25,7 @@ def make_record(**overrides) -> dict:
         "safe_to_delete": "YES",
         "match_confidence": "high",
         "match_reason": "Exact filename match",
+        "is_cloud_only": False,
         "width": None,
         "height": None,
     }
@@ -45,6 +47,13 @@ class TestRecordSchema:
         for v in ("high", "medium", "none", "unknown"):
             r = make_record(match_confidence=v)
             assert r["match_confidence"] == v
+
+    def test_is_cloud_only_defaults_false(self):
+        assert make_record()["is_cloud_only"] is False
+
+    def test_is_cloud_only_can_be_true(self):
+        r = make_record(is_cloud_only=True)
+        assert r["is_cloud_only"] is True
 
 
 class TestSafeToDeleteLogic:
