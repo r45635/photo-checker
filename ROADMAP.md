@@ -47,6 +47,22 @@ Full Next.js 14 + FastAPI web application replacing the CLI proof of concept.
 
 ---
 
+## Phase 1.1 — Stabilization (IN PROGRESS)
+
+Making the project a clean, testable, reproducible MVP before new features.
+
+- [x] `_COPY_SUFFIX_RE` extended to handle macOS/Windows copy numbering `(1)`, `(2)`
+- [x] `match_confidence` + `match_reason` fields added to scan records (high/medium/none/unknown)
+- [x] `match_confidence: "medium"` warning in detail panel and batch-delete modal
+- [x] AppleScript injection fixed: path passed as `argv` argument, not interpolated in script string
+- [x] `requirements.txt` split: core / optional (Google, OneDrive, viewer) / dev
+- [x] `requirements-dev.txt` with pytest and ruff
+- [x] 54 unit tests: copy-suffix, NFC, confidence model, path security, UUID injection
+- [x] `DEV_AUDIT.md` — audit findings, validation procedure, architecture reference
+- [x] `CLAUDE.md` personal path removed
+
+---
+
 ## Phase 2 — API integrations
 
 ### 2.1 — Google Photos
