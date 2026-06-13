@@ -1023,15 +1023,18 @@ async def import_to_photos(body: ImportBody) -> dict[str, str]:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Escape double-quotes in path (edge case for filenames with quotes)
-    escaped = str(file_path).replace('"', '\\"')
-    script = (
-        f'tell application "Photos" to import '
-        f'{{POSIX file "{escaped}"}} skip check duplicates true'
-    )
+    # Pass the path as an osascript argv argument so no path characters
+    # (quotes, backslashes, dollar signs, etc.) can affect the script.
+    script = """\
+on run argv
+    set thePath to item 1 of argv
+    tell application "Photos"
+        import {POSIX file thePath} skip check duplicates true
+    end tell
+end run"""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
+            "osascript", "-e", script, "--", str(file_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
