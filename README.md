@@ -218,3 +218,9 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 - Unicode normalization fix: 392 additional matches found after NFC normalization (files with accented names, e.g. Chloé)
 - Cross-format stem matching: correctly detects HEIC-stored Live Photos from JPEG backup files
 - Visual duplicate detection: Photos' perceptual AI is now handled correctly (silent skip = already imported)
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
