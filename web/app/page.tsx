@@ -24,8 +24,9 @@ export default function HomePage() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("YES")
   const [search, setSearch] = useState("")
   const [selectedSubfolder, setSelectedSubfolder] = useState<string | null>(null)
-  const [sortBy, setSortBy] = useState<SortBy>("date")
+  const [sortBy, setSortBy] = useState<SortBy>("name")
   const [sortDesc, setSortDesc] = useState(false)
+  const [groupByFolder, setGroupByFolder] = useState(false)
   const [batch, setBatch] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<PhotoRecord | null>(null)
   const [scanOpen, setScanOpen] = useState(false)
@@ -134,26 +135,34 @@ export default function HomePage() {
 
     // Sort
     list = [...list].sort((a, b) => {
+      // Folder grouping: sort by full subfolder path first (same direction as primary)
+      if (groupByFolder) {
+        const folderCmp = (a._subfolder ?? "").localeCompare(b._subfolder ?? "")
+        if (folderCmp !== 0) return sortDesc ? -folderCmp : folderCmp
+      }
       let cmp = 0
       if (sortBy === "name") {
         cmp = a.filename.toLowerCase().localeCompare(b.filename.toLowerCase())
       } else if (sortBy === "date") {
         const extractDate = (r: PhotoRecord) => {
-          const m = r.filename.match(/d(\d{8})/)
+          const m = r.filename.match(/(\d{8})/)
           return m ? m[1] : r.filename
         }
         cmp = extractDate(a).localeCompare(extractDate(b))
+      } else if (sortBy === "size") {
+        cmp = a.size_kb - b.size_kb
       } else {
-        // subfolder
-        const sfA = (a._subfolder ?? "") + "\x00" + a.filename.toLowerCase()
-        const sfB = (b._subfolder ?? "") + "\x00" + b.filename.toLowerCase()
-        cmp = sfA.localeCompare(sfB)
+        // type: sort by extension, then by name within same extension
+        const extA = a.filename.includes(".") ? a.filename.split(".").pop()!.toLowerCase() : ""
+        const extB = b.filename.includes(".") ? b.filename.split(".").pop()!.toLowerCase() : ""
+        cmp = extA.localeCompare(extB)
+        if (cmp === 0) cmp = a.filename.toLowerCase().localeCompare(b.filename.toLowerCase())
       }
       return sortDesc ? -cmp : cmp
     })
 
     return list
-  }, [preSubfiltered, selectedSubfolder, sortBy, sortDesc])
+  }, [preSubfiltered, selectedSubfolder, sortBy, sortDesc, groupByFolder])
 
   // ── Derived: visible slice ─────────────────────────────────────────────────
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount])
@@ -166,7 +175,7 @@ export default function HomePage() {
   }, [filtered])
 
   // ── Reset visibleCount only when filter/sort params change (not on import/delete) ──
-  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc)
+  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc) + String(groupByFolder)
   const prevFilterKey = useRef(filterKey)
   if (prevFilterKey.current !== filterKey) {
     prevFilterKey.current = filterKey
@@ -397,7 +406,7 @@ export default function HomePage() {
     | { type: "record"; record: PhotoRecord }
 
   const gridItems = useMemo<GridItem[]>(() => {
-    if (sortBy !== "subfolder") {
+    if (!groupByFolder) {
       return visible.map((r) => ({ type: "record" as const, record: r }))
     }
     const items: GridItem[] = []
@@ -412,7 +421,7 @@ export default function HomePage() {
       items.push({ type: "record", record: r })
     }
     return items
-  }, [visible, sortBy, subfolderMap])
+  }, [visible, groupByFolder, subfolderMap])
 
   // ── Metric cards ───────────────────────────────────────────────────────────
   const topbarMetrics = [
@@ -454,6 +463,8 @@ export default function HomePage() {
         onSortBy={setSortBy}
         sortDesc={sortDesc}
         onSortDesc={setSortDesc}
+        groupByFolder={groupByFolder}
+        onGroupByFolder={setGroupByFolder}
         subfolders={subfolderMap}
         selectedSubfolder={selectedSubfolder}
         onSelectSubfolder={setSelectedSubfolder}

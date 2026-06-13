@@ -30,6 +30,8 @@ interface SidebarProps {
   onSortBy: (s: SortBy) => void
   sortDesc: boolean
   onSortDesc: (v: boolean) => void
+  groupByFolder: boolean
+  onGroupByFolder: (v: boolean) => void
   subfolders: Map<string, number>
   selectedSubfolder: string | null
   onSelectSubfolder: (sf: string | null) => void
@@ -180,6 +182,8 @@ export default function Sidebar({
   onSortBy,
   sortDesc,
   onSortDesc,
+  groupByFolder,
+  onGroupByFolder,
   subfolders,
   selectedSubfolder,
   onSelectSubfolder,
@@ -195,7 +199,8 @@ export default function Sidebar({
   const sortOptions: { key: SortBy; label: string }[] = [
     { key: "name", label: "Name" },
     { key: "date", label: "Date" },
-    { key: "subfolder", label: "Folder" },
+    { key: "size", label: "Size" },
+    { key: "type", label: "Type" },
   ]
 
   const filterOptions: { key: FilterStatus; label: string; activeClass: string }[] = [
@@ -419,10 +424,23 @@ export default function Sidebar({
               })}
             </div>
             <button
+              onClick={() => onGroupByFolder(!groupByFolder)}
+              className="rounded-md p-1 transition-colors duration-150"
+              style={{
+                background: groupByFolder ? "#1a3a5c" : "#111d30",
+                color: groupByFolder ? "#60a5fa" : "#4a6080",
+              }}
+              title={groupByFolder ? "Grouped by folder — click to disable" : "Group by folder"}
+              onMouseEnter={(e) => { if (!groupByFolder) e.currentTarget.style.color = "#94a3b8" }}
+              onMouseLeave={(e) => { if (!groupByFolder) e.currentTarget.style.color = "#4a6080" }}
+            >
+              <Folder size={13} />
+            </button>
+            <button
               onClick={() => onSortDesc(!sortDesc)}
               className="rounded-md p-1 transition-colors duration-150"
               style={{ background: "#111d30", color: "#94a3b8" }}
-              title={sortDesc ? "Descending" : "Ascending"}
+              title={sortDesc ? "Descending — click for ascending" : "Ascending — click for descending"}
               onMouseEnter={(e) => (e.currentTarget.style.color = "#e2e8f0")}
               onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
             >

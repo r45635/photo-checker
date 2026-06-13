@@ -35,7 +35,7 @@ export interface ApplePhotoInfo {
 }
 
 export type FilterStatus = "ALL" | "YES" | "NO" | "MAYBE"
-export type SortBy = "name" | "date" | "subfolder"
+export type SortBy = "name" | "date" | "size" | "type"
 
 export interface BatchAction {
   type: "delete" | "import" | "force_delete" | "move"
