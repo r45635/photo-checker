@@ -34,6 +34,10 @@ function isVideo(path: string): boolean {
   return /\.(mp4|mov|avi|mkv|m4v|webm)$/i.test(path)
 }
 
+function isGif(path: string): boolean {
+  return /\.gif$/i.test(path)
+}
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "Unknown date"
   try {
@@ -222,6 +226,12 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                       videoSrc={videoUrl(record.path)}
                       posterSrc={thumbnailUrl(record.path)}
                       className="w-full h-full"
+                    />
+                  ) : isGif(record.path) ? (
+                    <img
+                      src={thumbnailUrl(record.path)}
+                      alt={record.filename}
+                      className="w-full h-full object-contain"
                     />
                   ) : thumbError ? (
                     <div className="flex flex-col items-center gap-2 text-[#4a6080]">

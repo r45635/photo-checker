@@ -350,6 +350,14 @@ def get_thumbnail(path: str = Query(...), size: int = Query(400)) -> Response:
         raise HTTPException(status_code=404, detail="File not found")
 
     ext = file_path.suffix.lower()
+
+    if ext == ".gif":
+        return Response(
+            content=file_path.read_bytes(),
+            media_type="image/gif",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     jpeg_bytes: bytes | None = None
 
     if ext in VIDEO_EXTENSIONS:
