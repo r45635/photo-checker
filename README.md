@@ -1,6 +1,6 @@
 # Photo Checker
 
-A macOS tool that scans a local folder of photos and checks — by filename — whether each file already exists in your cloud or local repositories, so you can safely delete confirmed duplicates.
+A macOS tool that scans a local folder of photos and checks — by filename — whether each file likely exists in your cloud or local repositories, helping you review probable duplicates before moving them to macOS Trash.
 
 ## Screenshots
 
@@ -30,7 +30,7 @@ A macOS tool that scans a local folder of photos and checks — by filename — 
   - **Apple Photos** ✅ — reads the local Photos library directly via `osxphotos` (no API, no network)
   - **Google Photos** 🚧 *(coming soon)* — API backend exists, UI integration in progress
   - **OneDrive** 🚧 *(coming soon)* — API backend exists, UI integration in progress
-- Labels each file: `YES` (safe to delete — confirmed backup), `NO` (not found), `MAYBE` (found but a check errored)
+- Labels each file: `YES` (likely duplicate — found with no check errors), `NO` (not found in any repository), `MAYBE` (found but a check errored — treat with caution)
 - Lets you select files and **move to Trash** (`send2trash`), **import to Apple Photos**, or **force-move** to a folder
 - Results are stored as JSON locally and browsable across sessions
 
@@ -151,7 +151,7 @@ cd web && npm run dev                        # UI on :3000 → open http://local
 3. Click any photo to open the **detail panel** — shows Apple Photos metadata (albums, date, cloud status) and an import button if not yet backed up. Use **Reveal in Finder** to locate the file on disk.
 4. Check individual photos or use **shift-click** to range-select; the **batch bar** appears at the bottom.
 5. From the batch bar:
-   - **Trash** — move confirmed YES files to macOS Trash (recoverable)
+   - **Trash** — move YES files to macOS Trash (recoverable; review `match_confidence` before bulk trashing)
    - **Import** — send NO files to Apple Photos (with live progress and auto-advance to next photo)
    - **Force delete** — move or trash files without confirmed backup (requires typing `DELETE`)
 6. Use **Server logs** (bottom of sidebar) to inspect backend activity and diagnose import errors.
@@ -182,8 +182,8 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 
 **Visual duplicate detection**: Apple Photos uses perceptual AI to detect duplicate photos during import, even when filenames and file sizes differ (e.g., a JPEG re-export of a HEIC). When Photos silently skips an import (empty stdout, exit 0), the tool correctly treats this as `already_in_photos` — a successful match.
 
-**`safe_to_delete = YES`** requires: found in ≥ 1 repository AND zero check errors.  
-**`safe_to_delete = MAYBE`** = found somewhere but at least one check errored. Hovering the MAYBE badge shows an explanation.
+**`safe_to_delete = YES`** means: found in ≥ 1 repository AND zero check errors. This is a signal for review, not a guarantee — matching is filename-based, not hash-based.  
+**`safe_to_delete = MAYBE`** = found somewhere but at least one check errored. Treat with extra caution. Hovering the MAYBE badge shows an explanation.
 
 **`match_confidence`** indicates how the match was found:
 - `high` — exact filename match or SHA-1 content match
