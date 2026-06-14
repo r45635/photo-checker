@@ -373,31 +373,9 @@ export default function Sidebar({
               )
             })}
           </div>
-          <button
-            onClick={onOpenAdvFilters}
-            className="mt-2 w-full flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors duration-150"
-            style={{
-              background: activeAdvFilterCount > 0 ? "#1a3a5c" : "transparent",
-              color: activeAdvFilterCount > 0 ? "#60a5fa" : "#4a6080",
-              border: `1px solid ${activeAdvFilterCount > 0 ? "#3b82f6" : "#1a2840"}`,
-            }}
-            onMouseEnter={(e) => { if (activeAdvFilterCount === 0) e.currentTarget.style.color = "#94a3b8" }}
-            onMouseLeave={(e) => { if (activeAdvFilterCount === 0) e.currentTarget.style.color = "#4a6080" }}
-          >
-            <SlidersHorizontal size={11} />
-            <span className="flex-1 text-left">Advanced filters</span>
-            {activeAdvFilterCount > 0 && (
-              <span
-                className="rounded-full px-1.5 text-[10px] font-semibold"
-                style={{ background: "#3b82f6", color: "#fff" }}
-              >
-                {activeAdvFilterCount}
-              </span>
-            )}
-          </button>
         </div>
 
-        {/* ── Search ── */}
+        {/* ── Search + advanced filter icon ── */}
         <div className="px-3 py-2">
           <div
             className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
@@ -423,6 +401,24 @@ export default function Sidebar({
                 <X size={13} />
               </button>
             )}
+            <button
+              onClick={onOpenAdvFilters}
+              className="relative shrink-0 rounded p-0.5 transition-colors duration-150"
+              style={{ color: activeAdvFilterCount > 0 ? "#60a5fa" : "#4a6080" }}
+              title="Advanced filters"
+              onMouseEnter={(e) => (e.currentTarget.style.color = activeAdvFilterCount > 0 ? "#93c5fd" : "#e2e8f0")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = activeAdvFilterCount > 0 ? "#60a5fa" : "#4a6080")}
+            >
+              <SlidersHorizontal size={13} />
+              {activeAdvFilterCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-1 rounded-full text-[9px] font-bold leading-none flex items-center justify-center"
+                  style={{ background: "#3b82f6", color: "#fff", minWidth: "13px", height: "13px", padding: "0 2px" }}
+                >
+                  {activeAdvFilterCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
