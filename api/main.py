@@ -959,13 +959,16 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                     with _Img.open(photo) as _im:
                         record["width"], record["height"] = _im.size
                         try:
-                            exif_raw = _im._getexif() or {}  # type: ignore[attr-defined]
-                            dt_str = exif_raw.get(36867)
+                            exif = _im.getexif()  # public API, works for JPEG + HEIC + TIFF
+                            dt_str = exif.get(36867)
                             if dt_str and len(dt_str) >= 10:
                                 record["datetime_original"] = dt_str[:10].replace(":", "-")
-                            gps = exif_raw.get(34853) or {}
-                            record["has_gps"] = bool(gps.get(2) and gps.get(4))
-                            record["has_camera"] = bool(exif_raw.get(271) or exif_raw.get(272))
+                            try:
+                                gps_ifd = exif.get_ifd(34853)
+                                record["has_gps"] = bool(gps_ifd.get(2) and gps_ifd.get(4))
+                            except Exception:
+                                pass
+                            record["has_camera"] = bool(exif.get(271) or exif.get(272))
                         except Exception:
                             pass
             except Exception:
