@@ -154,6 +154,34 @@ def _save_result_file(slug: str, records: list[dict[str, Any]]) -> None:
     path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+# ── OneDrive config / auth constants ────────────────────────────────────────────
+
+_OD_AUTHORITY  = "https://login.microsoftonline.com/consumers"
+_OD_SCOPES     = ["Files.Read"]
+_CONFIG_FILE   = Path.home() / ".photo_checker" / "config.json"
+_TOKENS_DIR    = Path.home() / ".photo_checker" / "tokens"
+_OD_CACHE_FILE = _TOKENS_DIR / "onedrive_cache.bin"
+
+_od_auth_result: dict = {"status": "idle"}
+_od_auth_lock = _threading.Lock()
+
+
+def _load_config() -> dict:
+    if _CONFIG_FILE.exists():
+        try:
+            return json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_config(cfg: dict) -> None:
+    _CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# ── Security ─────────────────────────────────────────────────────────────────────
+
 _SENSITIVE_PREFIXES = (
     "/etc", "/private/etc", "/System", "/usr/", "/bin/", "/sbin/",
     str(Path.home() / ".ssh"),
@@ -213,6 +241,7 @@ def _compute_subfolders(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class ScanBody(BaseModel):
     folder: str
     recursive: bool = False
+    onedrive: bool = False
 
 
 class ImportBody(BaseModel):
@@ -251,6 +280,130 @@ def get_logs(n: int = Query(default=200, ge=1, le=500)) -> list[str]:
     with _LOG_LOCK:
         lines = list(_LOG_BUFFER)
     return lines[-n:]
+
+
+# ── OneDrive endpoints ───────────────────────────────────────────────────────────
+
+class _OneDriveConfigBody(BaseModel):
+    client_id: str
+
+
+@app.get("/api/onedrive/status")
+def onedrive_status() -> dict:
+    """Return whether OneDrive is configured (client_id present) and authenticated (token cached)."""
+    cfg = _load_config()
+    configured = bool(cfg.get("onedrive", {}).get("client_id"))
+    authenticated = False
+    if configured and _OD_CACHE_FILE.exists():
+        try:
+            import msal
+            cache = msal.SerializableTokenCache()
+            cache.deserialize(_OD_CACHE_FILE.read_bytes())
+            app_client = msal.PublicClientApplication(
+                cfg["onedrive"]["client_id"],
+                authority=_OD_AUTHORITY,
+                token_cache=cache,
+            )
+            accounts = app_client.get_accounts()
+            if accounts:
+                result = app_client.acquire_token_silent(_OD_SCOPES, account=accounts[0])
+                authenticated = bool(result and "access_token" in result)
+        except Exception:
+            authenticated = False
+    return {"configured": configured, "authenticated": authenticated}
+
+
+@app.post("/api/onedrive/config")
+def onedrive_save_config(body: _OneDriveConfigBody) -> dict:
+    """Save (or update) the OneDrive client_id in config.json."""
+    client_id = body.client_id.strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id must not be empty")
+    cfg = _load_config()
+    cfg.setdefault("onedrive", {})["client_id"] = client_id
+    _save_config(cfg)
+    return {"ok": True}
+
+
+@app.post("/api/onedrive/auth/start")
+def onedrive_auth_start() -> dict:
+    """Initiate MSAL device-flow auth. Returns the code for the user to enter in the browser."""
+    global _od_auth_result
+    cfg = _load_config()
+    client_id = cfg.get("onedrive", {}).get("client_id", "")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="OneDrive client_id not configured")
+
+    try:
+        import msal
+    except ImportError:
+        raise HTTPException(status_code=501, detail="msal package not installed — run: pip install msal")
+
+    cache = msal.SerializableTokenCache()
+    if _OD_CACHE_FILE.exists():
+        cache.deserialize(_OD_CACHE_FILE.read_bytes())
+
+    app_client = msal.PublicClientApplication(client_id, authority=_OD_AUTHORITY, token_cache=cache)
+
+    # If already authenticated, return early
+    accounts = app_client.get_accounts()
+    if accounts:
+        result = app_client.acquire_token_silent(_OD_SCOPES, account=accounts[0])
+        if result and "access_token" in result:
+            with _od_auth_lock:
+                _od_auth_result = {"status": "done"}
+            return {"status": "already_authenticated"}
+
+    flow = app_client.initiate_device_flow(scopes=_OD_SCOPES)
+    if "user_code" not in flow:
+        raise HTTPException(status_code=500, detail=f"Device flow error: {flow.get('error_description', flow)}")
+
+    with _od_auth_lock:
+        _od_auth_result = {"status": "pending"}
+
+    def _poll_token():
+        global _od_auth_result
+        try:
+            result = app_client.acquire_token_by_device_flow(flow)
+            if "access_token" in result:
+                if cache.has_state_changed:
+                    _TOKENS_DIR.mkdir(parents=True, exist_ok=True)
+                    _OD_CACHE_FILE.write_bytes(cache.serialize().encode())
+                with _od_auth_lock:
+                    _od_auth_result = {"status": "done"}
+            else:
+                with _od_auth_lock:
+                    _od_auth_result = {"status": "error", "error": result.get("error_description", "Auth failed")}
+        except Exception as exc:
+            with _od_auth_lock:
+                _od_auth_result = {"status": "error", "error": str(exc)}
+
+    _threading.Thread(target=_poll_token, daemon=True).start()
+
+    return {
+        "user_code":        flow["user_code"],
+        "verification_uri": flow["verification_uri"],
+        "message":          flow["message"],
+        "expires_in":       flow.get("expires_in", 900),
+    }
+
+
+@app.get("/api/onedrive/auth/poll")
+def onedrive_auth_poll() -> dict:
+    """Return current auth state: {status: pending|done|error, error?: str}."""
+    with _od_auth_lock:
+        return dict(_od_auth_result)
+
+
+@app.delete("/api/onedrive/auth")
+def onedrive_disconnect() -> dict:
+    """Delete the cached token (disconnect OneDrive)."""
+    global _od_auth_result
+    if _OD_CACHE_FILE.exists():
+        _OD_CACHE_FILE.unlink()
+    with _od_auth_lock:
+        _od_auth_result = {"status": "idle"}
+    return {"ok": True}
 
 
 # ── GET /api/results ─────────────────────────────────────────────────────────────
@@ -884,8 +1037,8 @@ def get_apple_info(filename: str = Query(...), path: str | None = Query(None)) -
 
 # ── POST /api/scan ───────────────────────────────────────────────────────────────
 
-def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list[dict]]:
-    """Run the Apple-Photos check in-process and return (log_output, results)."""
+def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=None) -> tuple[str, list[dict]]:
+    """Run the Apple-Photos check (and optionally OneDrive) in-process."""
     # Import photo_checker from sibling directory (works in dev and when bundled)
     _pc_dir = str(_BUNDLE_DIR)
     if _pc_dir not in sys.path:
@@ -898,8 +1051,11 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
         load_apple_photos_filenames,
         check_apple,
         _check_apple_detail,
+        check_onedrive as _check_onedrive,
         status_label,
     )
+
+    od_config = _load_config() if onedrive else {}
 
     log = _io.StringIO()
     with contextlib.redirect_stdout(log):
@@ -923,9 +1079,18 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                 photo.name, apple_names,
                 stem_idx=apple_stems, size_idx=apple_sizes, filepath=photo,
             )
-            found_in = ["apple_photos"] if apple is True else []
-            has_error = apple is None
+
+            od_result = _check_onedrive(photo.name, od_config) if onedrive else None
+
+            found_in = []
+            if apple is True:
+                found_in.append("apple_photos")
+            if od_result is True:
+                found_in.append("onedrive")
+
+            has_error = (apple is None) or (onedrive and od_result is None)
             safe = bool(found_in) and not has_error
+
             is_cloud_only = False
             if apple is True:
                 apple_photo_obj = _find_apple_photo(photo.name, backup_path=str(photo))
@@ -939,7 +1104,7 @@ def _do_scan(folder: Path, recursive: bool, on_progress=None) -> tuple[str, list
                 "size_kb":           round(photo.stat().st_size / 1024, 1),
                 "apple_photos":      status_label(apple, False),
                 "google_photos":     "skipped",
-                "onedrive":          "skipped",
+                "onedrive":          status_label(od_result, not onedrive),
                 "found_in":          ", ".join(found_in) if found_in else "—",
                 "safe_to_delete":    "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
                 "match_confidence":  apple_confidence,
@@ -1014,7 +1179,7 @@ async def scan(body: ScanBody) -> StreamingResponse:
             def _progress(current: int, total: int, filename: str) -> None:
                 q.put({"type": "progress", "current": current, "total": total, "file": filename})
 
-            log, results = _do_scan(folder, body.recursive, on_progress=_progress)
+            log, results = _do_scan(folder, body.recursive, body.onedrive, on_progress=_progress)
             if not results:
                 q.put({"type": "error", "detail": f"No photos found in {folder}"})
                 return

@@ -58,12 +58,13 @@ export async function getAppleInfo(filename: string, backupPath?: string): Promi
 export async function scanFolder(
   folder: string,
   recursive: boolean,
+  onedrive: boolean = false,
   onProgress?: (current: number, total: number, file: string) => void
 ): Promise<{ slug: string; output: string }> {
   const res = await fetch(`${BASE}/api/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder, recursive }),
+    body: JSON.stringify({ folder, recursive, onedrive }),
   })
 
   if (!res.ok) {
@@ -179,4 +180,44 @@ export async function pickFolder(): Promise<string> {
   if (!res.ok) return ""
   const data = await res.json()
   return data.path ?? ""
+}
+
+// ── OneDrive ──────────────────────────────────────────────────────────────────
+
+export async function getOnedriveStatus(): Promise<{ configured: boolean; authenticated: boolean }> {
+  const res = await fetch(`${BASE}/api/onedrive/status`)
+  await throwIfNotOk(res)
+  return res.json()
+}
+
+export async function saveOnedriveConfig(clientId: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/onedrive/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: clientId }),
+  })
+  await throwIfNotOk(res)
+}
+
+export async function startOnedriveAuth(): Promise<{
+  user_code: string
+  verification_uri: string
+  message: string
+  expires_in: number
+  status?: string
+}> {
+  const res = await fetch(`${BASE}/api/onedrive/auth/start`, { method: "POST" })
+  await throwIfNotOk(res)
+  return res.json()
+}
+
+export async function pollOnedriveAuth(): Promise<{ status: "pending" | "done" | "error" | "idle"; error?: string }> {
+  const res = await fetch(`${BASE}/api/onedrive/auth/poll`)
+  await throwIfNotOk(res)
+  return res.json()
+}
+
+export async function disconnectOnedrive(): Promise<void> {
+  const res = await fetch(`${BASE}/api/onedrive/auth`, { method: "DELETE" })
+  await throwIfNotOk(res)
 }

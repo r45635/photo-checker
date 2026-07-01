@@ -510,6 +510,22 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
 
             {/* Footer */}
             <div className="px-5 py-4 border-t border-[#1a2840] shrink-0 space-y-1">
+              {record.onedrive !== "skipped" && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[#4a6080]">OneDrive</span>
+                  <span
+                    className={
+                      record.onedrive === "yes"
+                        ? "text-emerald-400"
+                        : record.onedrive === "no"
+                        ? "text-slate-500"
+                        : "text-amber-400"
+                    }
+                  >
+                    {record.onedrive}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-xs">
                 <span className="text-[#4a6080]">Size</span>
                 <span className="text-slate-500">{(record.size_kb / 1024).toFixed(2)} MB</span>

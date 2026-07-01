@@ -31,7 +31,7 @@ GOOGLE_CACHE_FILE     = CACHE_DIR  / 'google_filenames.json'
 GOOGLE_CACHE_TTL_HRS  = 24
 
 ONEDRIVE_CACHE_FILE   = TOKENS_DIR / 'onedrive_cache.bin'
-ONEDRIVE_AUTHORITY    = 'https://login.microsoftonline.com/common'
+ONEDRIVE_AUTHORITY    = 'https://login.microsoftonline.com/consumers'
 ONEDRIVE_SCOPES       = ['Files.Read']
 GOOGLE_SCOPES         = ['https://www.googleapis.com/auth/photoslibrary.readonly']
 
