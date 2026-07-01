@@ -6,9 +6,7 @@ import {
   scanFolder,
   getOnedriveStatus,
   saveOnedriveConfig,
-  startOnedriveAuth,
-  pollOnedriveAuth,
-  disconnectOnedrive,
+  type OnedriveStatus,
 } from "@/lib/api"
 
 interface ScanDialogProps {
@@ -18,8 +16,6 @@ interface ScanDialogProps {
 }
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-
-type OdAuthStep = "idle" | "setup" | "connecting" | "done" | "error"
 
 export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps) {
   const [folderPath, setFolderPath] = useState("")
@@ -32,15 +28,11 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
   const [visible, setVisible] = useState(false)
   const [progress, setProgress] = useState<{ current: number; total: number; file: string } | null>(null)
 
-  // OneDrive state
-  const [odStatus, setOdStatus] = useState<{ configured: boolean; authenticated: boolean } | null>(null)
+  // OneDrive state (via rclone)
+  const [odStatus, setOdStatus] = useState<OnedriveStatus | null>(null)
   const [odEnabled, setOdEnabled] = useState(false)
   const [odExpanded, setOdExpanded] = useState(false)
-  const [odAuthStep, setOdAuthStep] = useState<OdAuthStep>("idle")
-  const [odFlow, setOdFlow] = useState<{ user_code: string; verification_uri: string; message: string } | null>(null)
-  const [odClientId, setOdClientId] = useState("")
-  const [odError, setOdError] = useState("")
-  const odPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [odPath, setOdPath] = useState("")
 
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -69,14 +61,10 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       setProgress(null)
       setOdEnabled(false)
       setOdExpanded(false)
-      setOdAuthStep("idle")
-      setOdFlow(null)
-      setOdClientId("")
-      setOdError("")
       setTimeout(() => inputRef.current?.focus(), 150)
-      getOnedriveStatus().then(setOdStatus).catch(() => setOdStatus(null))
-    } else {
-      if (odPollRef.current) clearInterval(odPollRef.current)
+      getOnedriveStatus()
+        .then((s) => { setOdStatus(s); setOdPath(s.path ?? "") })
+        .catch(() => setOdStatus(null))
     }
   }, [open])
 
@@ -97,64 +85,12 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
     return () => window.removeEventListener("keydown", handleKey)
   }, [open, scanning, onClose])
 
-  async function handleOdSaveConfig() {
-    if (!odClientId.trim()) return
-    setOdError("")
+  async function persistOnedrive(remote: string, path: string) {
     try {
-      await saveOnedriveConfig(odClientId.trim())
+      await saveOnedriveConfig(remote, path)
       const status = await getOnedriveStatus()
       setOdStatus(status)
-      setOdAuthStep("idle")
-    } catch (e) {
-      setOdError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  async function handleOdConnect() {
-    setOdAuthStep("connecting")
-    setOdError("")
-    setOdFlow(null)
-    if (odPollRef.current) clearInterval(odPollRef.current)
-    try {
-      const data = await startOnedriveAuth()
-      if (data.status === "already_authenticated") {
-        setOdAuthStep("done")
-        const status = await getOnedriveStatus()
-        setOdStatus(status)
-        return
-      }
-      setOdFlow({ user_code: data.user_code, verification_uri: data.verification_uri, message: data.message })
-      odPollRef.current = setInterval(async () => {
-        try {
-          const poll = await pollOnedriveAuth()
-          if (poll.status === "done") {
-            clearInterval(odPollRef.current!)
-            setOdAuthStep("done")
-            const status = await getOnedriveStatus()
-            setOdStatus(status)
-          } else if (poll.status === "error") {
-            clearInterval(odPollRef.current!)
-            setOdAuthStep("error")
-            setOdError(poll.error ?? "Authentication failed")
-          }
-        } catch { /* ignore poll errors */ }
-      }, 3000)
-    } catch (e) {
-      setOdAuthStep("error")
-      setOdError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  async function handleOdDisconnect() {
-    if (odPollRef.current) clearInterval(odPollRef.current)
-    try {
-      await disconnectOnedrive()
-      const status = await getOnedriveStatus()
-      setOdStatus(status)
-      setOdEnabled(false)
-      setOdAuthStep("idle")
-      setOdFlow(null)
-    } catch { /* ignore */ }
+    } catch { /* ignore — status refresh will reflect reality */ }
   }
 
   async function handlePickFolder() {
@@ -182,7 +118,7 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       const result = await scanFolder(
         folderPath.trim(),
         recursive,
-        odEnabled && odStatus?.authenticated === true,
+        odEnabled && odStatus?.configured === true,
         (current, total, file) => setProgress({ current, total, file })
       )
       setOutput(result.output ?? "")
@@ -386,8 +322,10 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
             <span style={{ fontSize: "0.8125rem", color: "#94a3b8", flex: 1 }}>
               Cloud sources
             </span>
-            {odStatus?.authenticated && (
-              <span style={{ fontSize: "0.75rem", color: "#10b981", marginRight: "4px" }}>OneDrive connected</span>
+            {odStatus?.configured && (
+              <span style={{ fontSize: "0.75rem", color: "#10b981", marginRight: "4px" }}>
+                OneDrive: {odStatus.remote}
+              </span>
             )}
             {odExpanded
               ? <ChevronUp size={14} style={{ color: "#4a6080" }} />
@@ -398,159 +336,104 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
           {odExpanded && (
             <div style={{ padding: "12px", background: "#080e1a", borderTop: "1px solid #1a2840" }}>
 
-              {/* OneDrive toggle row */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: odStatus?.authenticated ? "8px" : "12px" }}>
-                <div
-                  style={{
-                    width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0,
-                    border: `1px solid ${odEnabled && odStatus?.authenticated ? "#3b82f6" : "#1a2840"}`,
-                    background: odEnabled && odStatus?.authenticated ? "#3b82f6" : "#080e1a",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: (!scanning && odStatus?.authenticated) ? "pointer" : "not-allowed",
-                    opacity: odStatus?.authenticated ? 1 : 0.4,
-                    transition: "background 150ms, border-color 150ms",
-                  }}
-                  onClick={() => { if (!scanning && odStatus?.authenticated) setOdEnabled((v) => !v) }}
-                >
-                  {odEnabled && odStatus?.authenticated && (
-                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                      <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
-                </div>
-                <span style={{ fontSize: "0.875rem", color: odStatus?.authenticated ? "#cbd5e1" : "#4a6080", flex: 1 }}>
-                  OneDrive
-                  {!odStatus?.authenticated && (
-                    <span style={{ marginLeft: "6px", fontSize: "0.75rem", color: "#4a6080" }}>
-                      (connect first)
-                    </span>
-                  )}
-                </span>
-                {odEnabled && odStatus?.authenticated && (
-                  <span style={{ fontSize: "0.75rem", color: "#f59e0b" }}>⚠ ~0.5 s/file</span>
-                )}
-              </div>
-
-              {/* Connected state — disconnect link */}
-              {odStatus?.authenticated && odAuthStep !== "connecting" && (
-                <div style={{ marginBottom: "8px" }}>
-                  <button
-                    onClick={handleOdDisconnect}
-                    style={{ background: "none", border: "none", color: "#4a6080", fontSize: "0.75rem", cursor: "pointer", padding: 0, textDecoration: "underline" }}
-                  >
-                    Disconnect OneDrive
-                  </button>
+              {/* rclone not installed */}
+              {odStatus && !odStatus.rclone_installed && (
+                <div style={{ fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.6 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "6px", color: "#f59e0b", marginBottom: "6px" }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: "2px" }} />
+                    <span>OneDrive uses <b>rclone</b>, which isn&apos;t installed.</span>
+                  </div>
+                  <div style={{ background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px", padding: "8px 10px", fontFamily: "ui-monospace, Menlo, monospace", color: "#cbd5e1" }}>
+                    brew install rclone<br />rclone config&nbsp;&nbsp;<span style={{ color: "#4a6080" }}># create a remote named &quot;onedrive&quot;</span>
+                  </div>
                 </div>
               )}
 
-              {/* Not configured — show client_id setup */}
-              {!odStatus?.configured && odAuthStep !== "connecting" && (
-                <div style={{ marginTop: "4px" }}>
-                  <p style={{ fontSize: "0.75rem", color: "#4a6080", margin: "0 0 8px 0", lineHeight: 1.5 }}>
-                    Enter your Azure App client ID to enable OneDrive.{" "}
-                    <a
-                      href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps"
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "#3b82f6" }}
+              {/* rclone installed but no onedrive remote */}
+              {odStatus && odStatus.rclone_installed && odStatus.remotes.length === 0 && (
+                <div style={{ fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.6 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: "6px", color: "#f59e0b", marginBottom: "6px" }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: "2px" }} />
+                    <span>rclone is installed but no OneDrive remote is configured.</span>
+                  </div>
+                  <div style={{ background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px", padding: "8px 10px", fontFamily: "ui-monospace, Menlo, monospace", color: "#cbd5e1" }}>
+                    rclone config&nbsp;&nbsp;<span style={{ color: "#4a6080" }}># choose OneDrive, name it &quot;onedrive&quot;</span>
+                  </div>
+                  <p style={{ margin: "6px 0 0 0", color: "#4a6080" }}>No Azure app needed — rclone handles the login in your browser.</p>
+                </div>
+              )}
+
+              {/* Remote(s) available — toggle + picker */}
+              {odStatus && odStatus.remotes.length > 0 && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                    <div
+                      style={{
+                        width: "16px", height: "16px", borderRadius: "4px", flexShrink: 0,
+                        border: `1px solid ${odEnabled && odStatus.configured ? "#3b82f6" : "#1a2840"}`,
+                        background: odEnabled && odStatus.configured ? "#3b82f6" : "#080e1a",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: (!scanning && odStatus.configured) ? "pointer" : "not-allowed",
+                        opacity: odStatus.configured ? 1 : 0.4,
+                        transition: "background 150ms, border-color 150ms",
+                      }}
+                      onClick={() => { if (!scanning && odStatus.configured) setOdEnabled((v) => !v) }}
                     >
-                      Register app →
-                    </a>
-                  </p>
-                  <div style={{ display: "flex", gap: "6px" }}>
+                      {odEnabled && odStatus.configured && (
+                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                          <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                    <span style={{ fontSize: "0.875rem", color: "#cbd5e1", flex: 1 }}>
+                      Check against OneDrive
+                    </span>
+                    {/* Remote picker (only if more than one) */}
+                    {odStatus.remotes.length > 1 && (
+                      <select
+                        value={odStatus.remote ?? ""}
+                        disabled={scanning}
+                        onChange={(e) => persistOnedrive(e.target.value, odPath)}
+                        style={{
+                          background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px",
+                          padding: "4px 8px", fontSize: "0.75rem", color: "#e2e8f0", outline: "none",
+                        }}
+                      >
+                        <option value="" disabled>choose remote…</option>
+                        {odStatus.remotes.map((r) => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Optional subfolder — greatly speeds up indexing on large drives */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "0.75rem", color: "#4a6080", flexShrink: 0, fontFamily: "ui-monospace, Menlo, monospace" }}>
+                      {odStatus.remote ?? "onedrive"}:
+                    </span>
                     <input
                       type="text"
-                      value={odClientId}
-                      onChange={(e) => setOdClientId(e.target.value)}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      value={odPath}
+                      disabled={scanning || !odStatus.remote}
+                      placeholder="Images  (optional folder — faster)"
+                      onChange={(e) => setOdPath(e.target.value)}
+                      onBlur={() => { if (odStatus.remote && odPath !== (odStatus.path ?? "")) persistOnedrive(odStatus.remote, odPath) }}
                       style={{
                         flex: 1, background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px",
-                        padding: "6px 10px", fontSize: "0.75rem", color: "#e2e8f0", outline: "none",
-                        fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+                        padding: "5px 8px", fontSize: "0.75rem", color: "#e2e8f0", outline: "none",
+                        fontFamily: "ui-monospace, Menlo, monospace",
                       }}
                       onFocus={(e) => { e.currentTarget.style.borderColor = "#3b82f6" }}
-                      onBlur={(e) => { e.currentTarget.style.borderColor = "#1a2840" }}
                     />
-                    <button
-                      onClick={handleOdSaveConfig}
-                      disabled={!odClientId.trim()}
-                      style={{
-                        flexShrink: 0, background: odClientId.trim() ? "#3b82f6" : "#1e3a5f",
-                        border: "none", borderRadius: "6px", padding: "6px 12px",
-                        fontSize: "0.75rem", color: odClientId.trim() ? "#fff" : "#4a6080",
-                        cursor: odClientId.trim() ? "pointer" : "not-allowed",
-                      }}
-                    >
-                      Save
-                    </button>
                   </div>
-                </div>
-              )}
 
-              {/* Configured but not authenticated — show Connect button */}
-              {odStatus?.configured && !odStatus?.authenticated && odAuthStep === "idle" && (
-                <button
-                  onClick={handleOdConnect}
-                  style={{
-                    marginTop: "4px", background: "#1e3a5f", border: "1px solid #3b82f6",
-                    borderRadius: "6px", padding: "6px 14px", fontSize: "0.8125rem",
-                    color: "#93c5fd", cursor: "pointer", width: "100%",
-                  }}
-                >
-                  Connect OneDrive
-                </button>
-              )}
-
-              {/* Auth in progress — show device flow code */}
-              {odAuthStep === "connecting" && odFlow && (
-                <div style={{ marginTop: "4px" }}>
-                  <p style={{ fontSize: "0.75rem", color: "#94a3b8", margin: "0 0 6px 0", lineHeight: 1.5 }}>
-                    1. Go to{" "}
-                    <a href={odFlow.verification_uri} target="_blank" rel="noreferrer" style={{ color: "#3b82f6" }}>
-                      {odFlow.verification_uri}
-                    </a>
-                  </p>
-                  <p style={{ fontSize: "0.75rem", color: "#94a3b8", margin: "0 0 8px 0" }}>
-                    2. Enter the code:
-                  </p>
-                  <div style={{
-                    background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px",
-                    padding: "8px 12px", textAlign: "center",
-                    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-                    fontSize: "1.25rem", letterSpacing: "0.25em", color: "#e2e8f0",
-                    marginBottom: "8px",
-                  }}>
-                    {odFlow.user_code}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#4a6080", fontSize: "0.75rem" }}>
-                    <Loader2 size={12} style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />
-                    Waiting for authentication…
-                  </div>
-                </div>
-              )}
-
-              {/* Auth connecting but no flow yet */}
-              {odAuthStep === "connecting" && !odFlow && (
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#4a6080", fontSize: "0.75rem", marginTop: "4px" }}>
-                  <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
-                  Starting authentication…
-                </div>
-              )}
-
-              {/* Auth done */}
-              {odAuthStep === "done" && (
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#10b981", fontSize: "0.8125rem", marginTop: "4px" }}>
-                  <CheckCircle2 size={13} />
-                  Connected — enable the toggle above to include in scan
-                </div>
-              )}
-
-              {/* Error */}
-              {(odAuthStep === "error" || odError) && (
-                <div style={{ display: "flex", alignItems: "flex-start", gap: "6px", color: "#f43f5e", fontSize: "0.75rem", marginTop: "4px" }}>
-                  <AlertCircle size={13} style={{ flexShrink: 0, marginTop: "1px" }} />
-                  {odError || "Authentication failed"}
-                </div>
+                  {odEnabled && odStatus.configured && (
+                    <p style={{ margin: 0, fontSize: "0.75rem", color: "#f59e0b", lineHeight: 1.5 }}>
+                      ⚠ First scan indexes {odPath ? `"${odPath}"` : "your whole OneDrive"} (can take minutes for large drives). Cached 24h afterwards.
+                    </p>
+                  )}
+                </>
               )}
 
             </div>

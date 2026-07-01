@@ -154,16 +154,9 @@ def _save_result_file(slug: str, records: list[dict[str, Any]]) -> None:
     path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-# ── OneDrive config / auth constants ────────────────────────────────────────────
+# ── OneDrive config (via rclone) ─────────────────────────────────────────────────
 
-_OD_AUTHORITY  = "https://login.microsoftonline.com/consumers"
-_OD_SCOPES     = ["Files.Read"]
-_CONFIG_FILE   = Path.home() / ".photo_checker" / "config.json"
-_TOKENS_DIR    = Path.home() / ".photo_checker" / "tokens"
-_OD_CACHE_FILE = _TOKENS_DIR / "onedrive_cache.bin"
-
-_od_auth_result: dict = {"status": "idle"}
-_od_auth_lock = _threading.Lock()
+_CONFIG_FILE = Path.home() / ".photo_checker" / "config.json"
 
 
 def _load_config() -> dict:
@@ -282,128 +275,75 @@ def get_logs(n: int = Query(default=200, ge=1, le=500)) -> list[str]:
     return lines[-n:]
 
 
-# ── OneDrive endpoints ───────────────────────────────────────────────────────────
+# ── OneDrive endpoints (via rclone) ───────────────────────────────────────────────
+#
+# OneDrive is read through the `rclone` CLI — no Azure app registration or client_id
+# is needed. The user installs rclone and runs `rclone config` once. See README.
 
 class _OneDriveConfigBody(BaseModel):
-    client_id: str
+    remote: str
+    path: str = ""   # optional subfolder to limit indexing (e.g. "Images")
+
+
+def _pc():
+    """Import photo_checker lazily (works in dev and when bundled)."""
+    _pc_dir = str(_BUNDLE_DIR)
+    if _pc_dir not in sys.path:
+        sys.path.insert(0, _pc_dir)
+    import photo_checker
+    return photo_checker
 
 
 @app.get("/api/onedrive/status")
 def onedrive_status() -> dict:
-    """Return whether OneDrive is configured (client_id present) and authenticated (token cached)."""
-    cfg = _load_config()
-    configured = bool(cfg.get("onedrive", {}).get("client_id"))
-    authenticated = False
-    if configured and _OD_CACHE_FILE.exists():
-        try:
-            import msal
-            cache = msal.SerializableTokenCache()
-            cache.deserialize(_OD_CACHE_FILE.read_bytes())
-            app_client = msal.PublicClientApplication(
-                cfg["onedrive"]["client_id"],
-                authority=_OD_AUTHORITY,
-                token_cache=cache,
-            )
-            accounts = app_client.get_accounts()
-            if accounts:
-                result = app_client.acquire_token_silent(_OD_SCOPES, account=accounts[0])
-                authenticated = bool(result and "access_token" in result)
-        except Exception:
-            authenticated = False
-    return {"configured": configured, "authenticated": authenticated}
+    """Report rclone availability, configured onedrive remotes, and the selected one."""
+    pc = _pc()
+    installed = pc.rclone_available()
+    remotes = pc.onedrive_remotes() if installed else []
+    od_cfg = _load_config().get("onedrive", {})
+    selected = od_cfg.get("remote")
+    # Auto-select when exactly one remote exists and none is chosen yet.
+    if not selected and len(remotes) == 1:
+        selected = remotes[0]
+    return {
+        "rclone_installed": installed,
+        "remotes":          remotes,
+        "remote":           selected if selected in remotes else None,
+        "path":             od_cfg.get("path", ""),
+        "configured":       bool(selected and selected in remotes),
+    }
 
 
 @app.post("/api/onedrive/config")
 def onedrive_save_config(body: _OneDriveConfigBody) -> dict:
-    """Save (or update) the OneDrive client_id in config.json."""
-    client_id = body.client_id.strip()
-    if not client_id:
-        raise HTTPException(status_code=400, detail="client_id must not be empty")
+    """Persist which rclone remote to use for OneDrive."""
+    remote = body.remote.strip()
+    if not remote:
+        raise HTTPException(status_code=400, detail="remote must not be empty")
+    if remote not in _pc().onedrive_remotes():
+        raise HTTPException(status_code=400, detail=f"rclone remote '{remote}' is not a configured onedrive remote")
     cfg = _load_config()
-    cfg.setdefault("onedrive", {})["client_id"] = client_id
+    od = cfg.setdefault("onedrive", {})
+    od["remote"] = remote
+    od["path"] = body.path.strip().strip("/")
     _save_config(cfg)
     return {"ok": True}
 
 
-@app.post("/api/onedrive/auth/start")
-def onedrive_auth_start() -> dict:
-    """Initiate MSAL device-flow auth. Returns the code for the user to enter in the browser."""
-    global _od_auth_result
-    cfg = _load_config()
-    client_id = cfg.get("onedrive", {}).get("client_id", "")
-    if not client_id:
-        raise HTTPException(status_code=400, detail="OneDrive client_id not configured")
-
-    try:
-        import msal
-    except ImportError:
-        raise HTTPException(status_code=501, detail="msal package not installed — run: pip install msal")
-
-    cache = msal.SerializableTokenCache()
-    if _OD_CACHE_FILE.exists():
-        cache.deserialize(_OD_CACHE_FILE.read_bytes())
-
-    app_client = msal.PublicClientApplication(client_id, authority=_OD_AUTHORITY, token_cache=cache)
-
-    # If already authenticated, return early
-    accounts = app_client.get_accounts()
-    if accounts:
-        result = app_client.acquire_token_silent(_OD_SCOPES, account=accounts[0])
-        if result and "access_token" in result:
-            with _od_auth_lock:
-                _od_auth_result = {"status": "done"}
-            return {"status": "already_authenticated"}
-
-    flow = app_client.initiate_device_flow(scopes=_OD_SCOPES)
-    if "user_code" not in flow:
-        raise HTTPException(status_code=500, detail=f"Device flow error: {flow.get('error_description', flow)}")
-
-    with _od_auth_lock:
-        _od_auth_result = {"status": "pending"}
-
-    def _poll_token():
-        global _od_auth_result
-        try:
-            result = app_client.acquire_token_by_device_flow(flow)
-            if "access_token" in result:
-                if cache.has_state_changed:
-                    _TOKENS_DIR.mkdir(parents=True, exist_ok=True)
-                    _OD_CACHE_FILE.write_bytes(cache.serialize().encode())
-                with _od_auth_lock:
-                    _od_auth_result = {"status": "done"}
-            else:
-                with _od_auth_lock:
-                    _od_auth_result = {"status": "error", "error": result.get("error_description", "Auth failed")}
-        except Exception as exc:
-            with _od_auth_lock:
-                _od_auth_result = {"status": "error", "error": str(exc)}
-
-    _threading.Thread(target=_poll_token, daemon=True).start()
-
-    return {
-        "user_code":        flow["user_code"],
-        "verification_uri": flow["verification_uri"],
-        "message":          flow["message"],
-        "expires_in":       flow.get("expires_in", 900),
-    }
-
-
-@app.get("/api/onedrive/auth/poll")
-def onedrive_auth_poll() -> dict:
-    """Return current auth state: {status: pending|done|error, error?: str}."""
-    with _od_auth_lock:
-        return dict(_od_auth_result)
-
-
-@app.delete("/api/onedrive/auth")
-def onedrive_disconnect() -> dict:
-    """Delete the cached token (disconnect OneDrive)."""
-    global _od_auth_result
-    if _OD_CACHE_FILE.exists():
-        _OD_CACHE_FILE.unlink()
-    with _od_auth_lock:
-        _od_auth_result = {"status": "idle"}
-    return {"ok": True}
+@app.post("/api/onedrive/refresh")
+def onedrive_refresh() -> dict:
+    """Force a rebuild of the OneDrive filename cache (returns the file count)."""
+    od_cfg = _load_config().get("onedrive", {})
+    remote = od_cfg.get("remote")
+    remotes = _pc().onedrive_remotes()
+    if not remote and len(remotes) == 1:
+        remote = remotes[0]
+    if not remote:
+        raise HTTPException(status_code=400, detail="No OneDrive remote configured")
+    names = _pc().load_onedrive_filenames(remote=remote, path=od_cfg.get("path", ""), force_refresh=True)
+    if names is None:
+        raise HTTPException(status_code=400, detail="rclone unavailable or remote not configured")
+    return {"ok": True, "count": len(names)}
 
 
 # ── GET /api/results ─────────────────────────────────────────────────────────────
@@ -1049,13 +989,16 @@ def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=
     from photo_checker import (
         scan_folder as _scan_folder,
         load_apple_photos_filenames,
+        load_onedrive_filenames,
         check_apple,
         _check_apple_detail,
         check_onedrive as _check_onedrive,
         status_label,
     )
 
-    od_config = _load_config() if onedrive else {}
+    _od_cfg = _load_config().get("onedrive", {}) if onedrive else {}
+    od_remote = _od_cfg.get("remote")
+    od_path = _od_cfg.get("path", "")
 
     log = _io.StringIO()
     with contextlib.redirect_stdout(log):
@@ -1068,10 +1011,22 @@ def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=
         apple_names   = apple_result[0] if apple_result else None
         apple_sizes   = apple_result[1] if apple_result else None
         apple_stems   = apple_result[2] if apple_result else None
+
+        # Build the OneDrive filename index once (cached 24h). None = skipped.
+        od_index = None
+        if onedrive:
+            if on_progress:
+                on_progress(0, len(photos), "Indexing OneDrive (first run can take minutes)…")
+            od_index = load_onedrive_filenames(remote=od_remote, path=od_path) if od_remote else None
         print()
 
         if on_progress:
             on_progress(0, len(photos), "Loading Apple Photos database…")
+
+        # If OneDrive was requested but the index could not be built (rclone missing,
+        # remote gone, listing failed), degrade to "skipped" rather than marking every
+        # file MAYBE.
+        od_active = onedrive and od_index is not None
 
         results = []
         for i, photo in enumerate(photos, 1):
@@ -1080,7 +1035,7 @@ def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=
                 stem_idx=apple_stems, size_idx=apple_sizes, filepath=photo,
             )
 
-            od_result = _check_onedrive(photo.name, od_config) if onedrive else None
+            od_result = _check_onedrive(photo.name, od_index) if od_active else None
 
             found_in = []
             if apple is True:
@@ -1088,7 +1043,7 @@ def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=
             if od_result is True:
                 found_in.append("onedrive")
 
-            has_error = (apple is None) or (onedrive and od_result is None)
+            has_error = (apple is None) or (od_active and od_result is None)
             safe = bool(found_in) and not has_error
 
             is_cloud_only = False
@@ -1104,7 +1059,7 @@ def _do_scan(folder: Path, recursive: bool, onedrive: bool = False, on_progress=
                 "size_kb":           round(photo.stat().st_size / 1024, 1),
                 "apple_photos":      status_label(apple, False),
                 "google_photos":     "skipped",
-                "onedrive":          status_label(od_result, not onedrive),
+                "onedrive":          status_label(od_result, not od_active),
                 "found_in":          ", ".join(found_in) if found_in else "—",
                 "safe_to_delete":    "YES" if safe else ("MAYBE" if found_in and has_error else "NO"),
                 "match_confidence":  apple_confidence,

@@ -182,42 +182,33 @@ export async function pickFolder(): Promise<string> {
   return data.path ?? ""
 }
 
-// ── OneDrive ──────────────────────────────────────────────────────────────────
+// ── OneDrive (via rclone) ─────────────────────────────────────────────────────
 
-export async function getOnedriveStatus(): Promise<{ configured: boolean; authenticated: boolean }> {
+export interface OnedriveStatus {
+  rclone_installed: boolean
+  remotes: string[]
+  remote: string | null
+  path: string
+  configured: boolean
+}
+
+export async function getOnedriveStatus(): Promise<OnedriveStatus> {
   const res = await fetch(`${BASE}/api/onedrive/status`)
   await throwIfNotOk(res)
   return res.json()
 }
 
-export async function saveOnedriveConfig(clientId: string): Promise<void> {
+export async function saveOnedriveConfig(remote: string, path: string = ""): Promise<void> {
   const res = await fetch(`${BASE}/api/onedrive/config`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: clientId }),
+    body: JSON.stringify({ remote, path }),
   })
   await throwIfNotOk(res)
 }
 
-export async function startOnedriveAuth(): Promise<{
-  user_code: string
-  verification_uri: string
-  message: string
-  expires_in: number
-  status?: string
-}> {
-  const res = await fetch(`${BASE}/api/onedrive/auth/start`, { method: "POST" })
+export async function refreshOnedrive(): Promise<{ ok: boolean; count: number }> {
+  const res = await fetch(`${BASE}/api/onedrive/refresh`, { method: "POST" })
   await throwIfNotOk(res)
   return res.json()
-}
-
-export async function pollOnedriveAuth(): Promise<{ status: "pending" | "done" | "error" | "idle"; error?: string }> {
-  const res = await fetch(`${BASE}/api/onedrive/auth/poll`)
-  await throwIfNotOk(res)
-  return res.json()
-}
-
-export async function disconnectOnedrive(): Promise<void> {
-  const res = await fetch(`${BASE}/api/onedrive/auth`, { method: "DELETE" })
-  await throwIfNotOk(res)
 }

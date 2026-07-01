@@ -13,11 +13,12 @@ import re
 import sys
 import json
 import csv
+import shutil
 import argparse
 import logging
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
-from urllib.parse import quote
 
 # ── Config & paths ─────────────────────────────────────────────────────────────
 
@@ -30,10 +31,15 @@ GOOGLE_TOKEN_FILE     = TOKENS_DIR / 'google_token.json'
 GOOGLE_CACHE_FILE     = CACHE_DIR  / 'google_filenames.json'
 GOOGLE_CACHE_TTL_HRS  = 24
 
-ONEDRIVE_CACHE_FILE   = TOKENS_DIR / 'onedrive_cache.bin'
-ONEDRIVE_AUTHORITY    = 'https://login.microsoftonline.com/consumers'
-ONEDRIVE_SCOPES       = ['Files.Read']
 GOOGLE_SCOPES         = ['https://www.googleapis.com/auth/photoslibrary.readonly']
+
+# OneDrive is accessed through the `rclone` CLI (https://rclone.org) instead of the
+# Microsoft Graph API. rclone ships its own registered OAuth client, so the user
+# authenticates once with `rclone config` and NO Azure app registration is needed.
+# We list all filenames once and cache them (mirrors the Google Photos strategy).
+ONEDRIVE_REMOTE          = 'onedrive'                       # default rclone remote name
+ONEDRIVE_CACHE_FILE      = CACHE_DIR / 'onedrive_filenames.json'
+ONEDRIVE_CACHE_TTL_HRS   = 24
 
 IMAGE_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.heic', '.heif',
@@ -75,17 +81,14 @@ def init_config():
         "google": {
             "client_id":     "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
             "client_secret": "YOUR_GOOGLE_CLIENT_SECRET"
-        },
-        "onedrive": {
-            "client_id": "YOUR_MICROSOFT_APP_CLIENT_ID"
         }
     }
     CONFIG_FILE.write_text(json.dumps(template, indent=2))
     print(f"Config template written to: {CONFIG_FILE}")
     print("Edit it with your API credentials, then re-run the tool.")
     print("\nSetup instructions:")
-    print("  Google  → https://console.cloud.google.com (enable Photos Library API, create OAuth client, Desktop app type)")
-    print("  OneDrive → https://portal.azure.com (App registrations, add Files.Read scope, Public client)")
+    print("  Google   → https://console.cloud.google.com (enable Photos Library API, create OAuth client, Desktop app type)")
+    print("  OneDrive → install rclone (https://rclone.org) then run: rclone config  (create a remote named 'onedrive')")
 
 # ── Apple Photos ───────────────────────────────────────────────────────────────
 
@@ -333,81 +336,116 @@ def check_google(filename: str, index: set | None) -> bool | None:
         return None
     return filename.lower() in index
 
-# ── OneDrive ───────────────────────────────────────────────────────────────────
-
-def _onedrive_token(config: dict) -> str:
-    import msal
-
-    cache = msal.SerializableTokenCache()
-    if ONEDRIVE_CACHE_FILE.exists():
-        cache.deserialize(ONEDRIVE_CACHE_FILE.read_bytes())
-
-    app = msal.PublicClientApplication(
-        config['onedrive']['client_id'],
-        authority=ONEDRIVE_AUTHORITY,
-        token_cache=cache,
-    )
-
-    accounts = app.get_accounts()
-    result = None
-    if accounts:
-        result = app.acquire_token_silent(ONEDRIVE_SCOPES, account=accounts[0])
-
-    if not result:
-        print("\n  OneDrive authentication required:")
-        flow = app.initiate_device_flow(scopes=ONEDRIVE_SCOPES)
-        print(f"  {flow['message']}\n")
-        result = app.acquire_token_by_device_flow(flow)
-
-    if cache.has_state_changed:
-        TOKENS_DIR.mkdir(parents=True, exist_ok=True)
-        ONEDRIVE_CACHE_FILE.write_bytes(cache.serialize().encode())
-
-    if 'access_token' not in result:
-        raise RuntimeError(f"OneDrive auth failed: {result.get('error_description', result)}")
-
-    return result['access_token']
+# ── OneDrive (via rclone) ───────────────────────────────────────────────────────
+#
+# OneDrive is read through the `rclone` CLI. rclone ships its own registered OAuth
+# client, so the end user runs `rclone config` once (a normal browser login) and
+# NO Azure app registration / client_id is required. We list every filename once
+# via `rclone lsf` and cache the set for 24h — a lookup is then O(1) per file,
+# unlike the old Graph API which cost one HTTP request per photo.
 
 
-_onedrive_token_cache: str | None = None
+def rclone_available() -> bool:
+    """True if the rclone binary is on PATH."""
+    return shutil.which('rclone') is not None
 
-def check_onedrive(filename: str, config: dict) -> bool | None:
-    global _onedrive_token_cache
+
+def onedrive_remotes() -> list[str]:
+    """Return the names of configured rclone remotes whose type is `onedrive`."""
+    if not rclone_available():
+        return []
     try:
-        import requests as req
+        out = subprocess.run(
+            ['rclone', 'listremotes', '--long'],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception:
+        return []
+    remotes = []
+    for line in out.splitlines():
+        # format: "name: type"
+        if ':' in line:
+            name, _, rtype = line.partition(':')
+            if rtype.strip() == 'onedrive':
+                remotes.append(name.strip())
+    return remotes
 
-        if _onedrive_token_cache is None:
-            _onedrive_token_cache = _onedrive_token(config)
 
-        # Use search endpoint; encode filename safely
-        safe_name = filename.replace("'", "''")  # escape single quotes in OData
-        url = f"https://graph.microsoft.com/v1.0/me/drive/root/search(q='{quote(safe_name)}')"
+def _fetch_onedrive_filenames(remote: str, path: str = '', on_progress=None) -> set:
+    """Stream `rclone lsf -R --files-only` and return NFC-lowercased basenames.
 
-        resp = req.get(
-            url,
-            headers={'Authorization': f'Bearer {_onedrive_token_cache}'},
-            params={'$select': 'name,id', '$top': 10},
-            timeout=20,
-        )
+    `path` optionally restricts the listing to a subfolder (e.g. "Images"), which
+    is much faster than indexing an entire multi-hundred-GB drive.
+    """
+    names: set[str] = set()
+    target = f'{remote}:{path}' if path else f'{remote}:'
+    proc = subprocess.Popen(
+        ['rclone', 'lsf', '--recursive', '--files-only', target],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        base = os.path.basename(line.rstrip('\n'))
+        if base:
+            names.add(_nfc(base).lower())
+        if on_progress and len(names) % 5000 == 0:
+            on_progress(len(names))
+    proc.wait()
+    if proc.returncode not in (0, None):
+        raise RuntimeError(f"rclone lsf exited with code {proc.returncode}")
+    return names
 
-        if resp.status_code == 401:
-            # Token expired mid-run; clear cache and retry once
-            _onedrive_token_cache = _onedrive_token(config)
-            resp = req.get(url,
-                           headers={'Authorization': f'Bearer {_onedrive_token_cache}'},
-                           params={'$select': 'name,id', '$top': 10},
-                           timeout=20)
 
-        resp.raise_for_status()
-        items = resp.json().get('value', [])
-        return any(item.get('name', '').lower() == filename.lower() for item in items)
+def load_onedrive_filenames(remote: str = ONEDRIVE_REMOTE,
+                            path: str = '',
+                            force_refresh: bool = False,
+                            on_progress=None) -> set | None:
+    """Return the cached set of OneDrive filenames, refreshing if stale/missing.
 
-    except ImportError:
-        print("  WARNING: msal not installed — skipping OneDrive.")
+    `path` optionally limits indexing to a subfolder. Returns None (skip) if rclone
+    is unavailable or the remote is not configured.
+    """
+    if not rclone_available():
+        print("  WARNING: rclone not installed — skipping OneDrive. See README.")
         return None
+    if remote not in onedrive_remotes():
+        print(f"  WARNING: rclone remote '{remote}' not configured — skipping OneDrive.")
+        return None
+
+    try:
+        if not force_refresh and ONEDRIVE_CACHE_FILE.exists():
+            cached = json.loads(ONEDRIVE_CACHE_FILE.read_text())
+            if cached.get('remote') == remote and cached.get('path', '') == path:
+                age = datetime.now() - datetime.fromisoformat(cached['fetched_at'])
+                if age < timedelta(hours=ONEDRIVE_CACHE_TTL_HRS):
+                    names = set(cached['filenames'])
+                    print(f"  OneDrive: {len(names):,} files from cache "
+                          f"(age {int(age.total_seconds()//3600)}h).")
+                    return names
+
+        scope = f"{remote}:{path}" if path else f"{remote}: (whole drive)"
+        print(f"  OneDrive: indexing {scope} via rclone (first run can take minutes)…")
+        names = _fetch_onedrive_filenames(remote, path=path, on_progress=on_progress)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        ONEDRIVE_CACHE_FILE.write_text(json.dumps({
+            'fetched_at': datetime.now().isoformat(),
+            'remote':     remote,
+            'path':       path,
+            'filenames':  list(names),
+        }))
+        print(f"  OneDrive: {len(names):,} files indexed and cached.")
+        return names
+
     except Exception as e:
-        logging.debug(f"OneDrive check error for {filename}: {e}")
+        print(f"  WARNING: OneDrive error ({e}) — skipping.")
         return None
+
+
+def check_onedrive(filename: str, index: set | None) -> bool | None:
+    """Return True/False if `index` is available, else None (skipped)."""
+    if index is None:
+        return None
+    return _nfc(filename).lower() in index
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
@@ -447,8 +485,7 @@ def main():
         print(f"Error: not a directory: {folder}")
         sys.exit(1)
 
-    need_config = not args.skip_google or not args.skip_onedrive
-    config = load_config() if need_config else {}
+    config = load_config() if not args.skip_google else {}
 
     # ── Scan ──────────────────────────────────────────────────────────────────
     photos = scan_folder(folder, recursive=args.recursive)
@@ -463,6 +500,7 @@ def main():
     apple_sizes: dict | None = apple_result[1] if apple_result else None
     apple_stems: set | None  = apple_result[2] if apple_result else None
     google_idx = None if args.skip_google else load_google_filenames(config, args.refresh_cache)
+    onedrive_idx = None if args.skip_onedrive else load_onedrive_filenames(force_refresh=args.refresh_cache)
 
     print()
 
@@ -471,7 +509,7 @@ def main():
     for i, photo in enumerate(photos, 1):
         apple    = check_apple(photo.name, apple_names, apple_sizes, photo, apple_stems) if not args.skip_apple else None
         google   = check_google(photo.name, google_idx) if not args.skip_google else None
-        onedrive = check_onedrive(photo.name, config)   if not args.skip_onedrive else None
+        onedrive = check_onedrive(photo.name, onedrive_idx) if not args.skip_onedrive else None
 
         found_in = [
             repo for repo, found in [('apple_photos', apple), ('google_photos', google), ('onedrive', onedrive)]

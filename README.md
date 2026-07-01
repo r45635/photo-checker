@@ -28,8 +28,8 @@ A macOS tool that scans a local folder of photos and checks — by filename — 
 
 - Scans a local folder (optionally recursive) and checks each photo by filename against:
   - **Apple Photos** ✅ — reads the local Photos library directly via `osxphotos` (no API, no network)
+  - **OneDrive** ✅ — via the [`rclone`](https://rclone.org) CLI; **no Azure app registration needed** (see [OneDrive setup](#onedrive-setup-optional))
   - **Google Photos** 🚧 *(coming soon)* — API backend exists, UI integration in progress
-  - **OneDrive** 🚧 *(coming soon)* — API backend exists, UI integration in progress
 - Labels each file: `YES` (likely duplicate — found with no check errors), `NO` (not found in any repository), `MAYBE` (found but a check errored — treat with caution)
 - Lets you select files and **move to Trash** (`send2trash`), **import to Apple Photos**, or **force-move** to a folder
 - Results are stored as JSON locally and browsable across sessions
@@ -107,7 +107,42 @@ pip install -r requirements-dev.txt  # pytest, ruff
 pytest -v
 ```
 
-### Config (for Google Photos / OneDrive)
+Apple Photos works with **no config** — it reads the local library directly.
+
+### OneDrive setup (optional)
+
+OneDrive is read through [`rclone`](https://rclone.org), which ships its own registered
+OAuth client. This means **you do not need to create an Azure app registration or a
+`client_id`** — a single browser login is all it takes.
+
+```bash
+# 1. Install rclone
+brew install rclone
+
+# 2. Configure a OneDrive remote — name it "onedrive"
+rclone config
+#   n) New remote
+#   name> onedrive
+#   Storage> onedrive         (search the list, it's "Microsoft OneDrive")
+#   client_id> (leave blank)   ← blank uses rclone's built-in app; no Azure needed
+#   client_secret> (leave blank)
+#   ... follow the browser login, then pick your OneDrive (Personal / Business)
+
+# 3. Verify
+rclone lsd onedrive:
+```
+
+Then in the app's **Scan** dialog, expand **Cloud sources**, tick **Check against
+OneDrive**, and scan. The first scan indexes your entire OneDrive filename list once
+(this can take a few minutes on large drives) and caches it for 24 h; subsequent scans
+are instant.
+
+> **Why rclone?** Microsoft has deprecated personal-account app registrations outside a
+> directory, making the direct Graph API path require a paid Azure tenant. rclone
+> sidesteps this entirely and, because it lists all filenames once, is far faster than
+> one Graph API call per photo.
+
+### Config (for Google Photos)
 
 ```bash
 mkdir -p ~/.photo_checker/tokens ~/.photo_checker/cache
@@ -117,13 +152,12 @@ Create `~/.photo_checker/config.json`:
 
 ```json
 {
-  "google_client_id": "YOUR_GOOGLE_CLIENT_ID",
-  "google_client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
-  "onedrive_client_id": "YOUR_AZURE_APP_CLIENT_ID"
+  "google": {
+    "client_id": "YOUR_GOOGLE_CLIENT_ID",
+    "client_secret": "YOUR_GOOGLE_CLIENT_SECRET"
+  }
 }
 ```
-
-Apple Photos works with no config — it reads the local library directly.
 
 ---
 
@@ -242,7 +276,8 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 | Cross-format stem matching | iPhone Live Photos saved as HEIC but backups are JPEG — same stem, different extension |
 | Copy-suffix stripping | Users make copies like "IMG_1234 - Copie.jpg" or "Chloé (1).jpg"; these are the same photo — handles Apple Photos duplicate merge |
 | Google Photos uses a local 24 h cache | The API has no filename search; listing everything once avoids thousands of paginated API calls |
-| OneDrive uses per-file Graph search | `GET /me/drive/root/search(q='filename')` — acceptable for typical folder sizes |
+| OneDrive via `rclone` (not the Graph API) | Microsoft deprecated personal-account app registrations; rclone's built-in OAuth client needs no Azure setup |
+| OneDrive filename index cached 24 h | `rclone lsf -R` lists all names once (an O(1) lookup per photo) instead of one API call per file |
 | Deletion via `send2trash` | Never permanent; files land in macOS Trash and can be restored |
 | `skip check duplicates true` in AppleScript import | Prevents Photos from showing a blocking dialog that would time out the API |
 | Silent import (empty stdout) = success | Photos silently skips visual duplicates (exit 0, no output) — correctly treated as already imported |
