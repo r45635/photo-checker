@@ -75,12 +75,14 @@ Making the project a clean, testable, reproducible MVP before new features.
 - [ ] Full scan with Google Photos enabled, verify cache written
 - [ ] UI toggle to enable/disable Google Photos check
 
-### 2.2 — OneDrive
-- [ ] Register app in Azure portal, add `Files.Read` delegated scope
-- [ ] Enable public client / native flows, fill `client_id` in config
-- [ ] Run first auth (device flow), verify token cached
-- [ ] Full scan with OneDrive enabled
-- [ ] UI toggle to enable/disable OneDrive check
+### 2.2 — OneDrive (DONE — via rclone, no Azure)
+Microsoft deprecated personal-account app registrations outside a directory, so the
+Graph API path was dropped in favour of the `rclone` CLI (built-in OAuth, no Azure app).
+- [x] `rclone config` (browser login) — no `client_id` / Azure registration needed
+- [x] Filename index via `rclone lsf -R`, cached 24 h (O(1) lookup per photo)
+- [x] Optional subfolder to avoid indexing a whole multi-hundred-GB drive
+- [x] UI toggle + remote picker + subfolder field in the scan dialog
+- [x] Validated end-to-end against a real 1 TB OneDrive
 
 ### 2.3 — Combined run
 - [ ] Run all three sources on the same folder
@@ -91,7 +93,7 @@ Making the project a clean, testable, reproducible MVP before new features.
 ## Phase 3 — Performance & accuracy
 
 - [ ] Large folder test: 5 000+ files, measure total runtime
-- [ ] OneDrive: consider building a filename cache (currently one API call per file)
+- [x] OneDrive: filename cache (rclone lists all names once, cached 24 h — done in 2.2)
 - [ ] Google token auto-refresh validation
 - [ ] EXIF date+size as secondary signal for renamed files (reduce false negatives)
 - [ ] Hash-based fallback for Apple Photos (already have fingerprint index — wire into scan)
@@ -107,6 +109,8 @@ Making the project a clean, testable, reproducible MVP before new features.
 - [x] MAYBE tooltip
 - [x] Server log panel
 - [x] Security hardening (UUID validation, path traversal guard)
+- [x] Source filter in the main UX (All / Both / Apple only / OneDrive only / Neither) + per-thumbnail source badges
+- [x] Thumbnails honor EXIF orientation (`exif_transpose`) + versioned URLs to bust stale cache
 - [ ] Settings screen (API credentials, cache management)
 - [ ] Export filtered results as CSV
 - [ ] Dark/light mode

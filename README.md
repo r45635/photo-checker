@@ -285,6 +285,8 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 | In-memory 500-line log buffer | Visible via `GET /api/logs` and the Server logs panel — helps diagnose silent failures |
 | UUID validation before AppleScript | `open-photos` validates UUID format to prevent AppleScript injection |
 | Path validation on thumbnail/video endpoints | `_validate_media_path()` blocks traversal into system paths and non-media extensions |
+| Thumbnails honor EXIF orientation | `ImageOps.exif_transpose()` rotates pixels per the EXIF Orientation tag so photos shot sideways render upright |
+| Thumbnail URLs are versioned (`&v=N`) | Thumbnails are cached 24 h; bumping the version busts the browser cache when the rendering logic changes (e.g. the orientation fix) |
 
 ## Tested
 
