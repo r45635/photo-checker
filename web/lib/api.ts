@@ -32,8 +32,12 @@ export async function getResults(slug: string): Promise<PhotoRecord[]> {
   return res.json()
 }
 
+// Bump when thumbnail rendering changes (e.g. EXIF orientation) to bust the
+// browser's cached thumbnails, whose URL would otherwise stay identical.
+const THUMB_VERSION = "2"
+
 export function thumbnailUrl(path: string, size?: number): string {
-  return BASE + "/api/thumbnail?path=" + encodeURIComponent(path) + "&size=" + (size ?? 400)
+  return BASE + "/api/thumbnail?path=" + encodeURIComponent(path) + "&size=" + (size ?? 400) + "&v=" + THUMB_VERSION
 }
 
 export function videoUrl(path: string): string {
@@ -43,7 +47,7 @@ export function videoUrl(path: string): string {
 export function appleThumbnailUrl(filename: string, backupPath?: string, size?: number): string {
   let url = BASE + "/api/apple-thumbnail?filename=" + encodeURIComponent(filename) + "&size=" + (size ?? 400)
   if (backupPath) url += "&path=" + encodeURIComponent(backupPath)
-  return url
+  return url + "&v=" + THUMB_VERSION
 }
 
 export async function getAppleInfo(filename: string, backupPath?: string): Promise<ApplePhotoInfo | null> {
