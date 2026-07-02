@@ -476,9 +476,10 @@ def _image_thumbnail(file_path: Path, size: int) -> bytes | None:
         except ImportError:
             pass
 
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         with Image.open(file_path) as img:
+            img = ImageOps.exif_transpose(img)  # honor EXIF orientation tag
             img = img.convert("RGB")
             img.thumbnail((size, size))
             buf = io.BytesIO()
