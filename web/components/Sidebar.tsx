@@ -17,7 +17,7 @@ import {
   ScrollText,
   SlidersHorizontal,
 } from "lucide-react"
-import type { FilterStatus, ResultFile, SortBy } from "@/lib/types"
+import type { FilterStatus, ResultFile, SortBy, SourceFilter } from "@/lib/types"
 
 interface SidebarProps {
   results: ResultFile[]
@@ -25,6 +25,10 @@ interface SidebarProps {
   onSelectSlug: (slug: string) => void
   filterStatus: FilterStatus
   onFilterStatus: (s: FilterStatus) => void
+  sourceFilter: SourceFilter
+  onSourceFilter: (s: SourceFilter) => void
+  showSourceFilter: boolean
+  sourceCounts: { all: number; both: number; apple: number; onedrive: number; neither: number }
   search: string
   onSearch: (s: string) => void
   sortBy: SortBy
@@ -179,6 +183,10 @@ export default function Sidebar({
   onSelectSlug,
   filterStatus,
   onFilterStatus,
+  sourceFilter,
+  onSourceFilter,
+  showSourceFilter,
+  sourceCounts,
   search,
   onSearch,
   sortBy,
@@ -213,6 +221,14 @@ export default function Sidebar({
     { key: "YES",   label: "YES",   activeClass: "bg-emerald-600 text-white border-emerald-600" },
     { key: "NO",    label: "NO",    activeClass: "bg-rose-600 text-white border-rose-600" },
     { key: "MAYBE", label: "MAYBE", activeClass: "bg-amber-500 text-white border-amber-500" },
+  ]
+
+  const sourceOptions: { key: SourceFilter; label: string; count: number; activeClass: string }[] = [
+    { key: "all",      label: "All",       count: sourceCounts.all,      activeClass: "bg-blue-600 text-white border-blue-600" },
+    { key: "both",     label: "Both",      count: sourceCounts.both,     activeClass: "bg-violet-600 text-white border-violet-600" },
+    { key: "apple",    label: "Apple only",count: sourceCounts.apple,    activeClass: "bg-emerald-600 text-white border-emerald-600" },
+    { key: "onedrive", label: "OneDrive only", count: sourceCounts.onedrive, activeClass: "bg-sky-600 text-white border-sky-600" },
+    { key: "neither",  label: "Neither",   count: sourceCounts.neither,  activeClass: "bg-rose-600 text-white border-rose-600" },
   ]
 
   const hasSubfolders =
@@ -374,6 +390,39 @@ export default function Sidebar({
             })}
           </div>
         </div>
+
+        {/* ── Source pills (only when a 2nd repository was scanned) ── */}
+        {showSourceFilter && (
+          <div className="px-3 pb-2">
+            <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: "#4a6080" }}>Source</p>
+            <div className="flex gap-1 flex-wrap">
+              {sourceOptions.map((opt) => {
+                const active = sourceFilter === opt.key
+                return (
+                  <button
+                    key={opt.key}
+                    onClick={() => onSourceFilter(opt.key)}
+                    className={`h-6 px-2 rounded-full text-xs font-medium border transition-colors duration-150 inline-flex items-center gap-1 ${
+                      active ? opt.activeClass : "text-slate-500"
+                    }`}
+                    style={!active ? { borderColor: "#1a2840", background: "transparent" } : {}}
+                  >
+                    {opt.label}
+                    <span
+                      className="rounded-full text-[10px] leading-none px-1 py-0.5"
+                      style={{
+                        background: active ? "rgba(255,255,255,0.2)" : "#1a2840",
+                        color: active ? "#fff" : "#4a6080",
+                      }}
+                    >
+                      {opt.count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ── Search + advanced filter icon ── */}
         <div className="px-3 py-2">

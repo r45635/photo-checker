@@ -12,7 +12,7 @@ import LogPanel from "@/components/LogPanel"
 import Lightbox from "@/components/Lightbox"
 import AdvancedFilterModal from "@/components/AdvancedFilterModal"
 import { listResults, getResults, deleteResult, thumbnailUrl, openInFinder, scanFolder } from "@/lib/api"
-import type { AdvancedFilters, FilterStatus, PhotoRecord, ResultFile, SortBy } from "@/lib/types"
+import type { AdvancedFilters, FilterStatus, PhotoRecord, ResultFile, SortBy, SourceFilter } from "@/lib/types"
 import { DEFAULT_ADVANCED_FILTERS } from "@/lib/types"
 
 export default function HomePage() {
@@ -25,6 +25,7 @@ export default function HomePage() {
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("YES")
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all")
   const [search, setSearch] = useState("")
   const [selectedSubfolder, setSelectedSubfolder] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>("name")
@@ -80,7 +81,13 @@ export default function HomePage() {
       .finally(() => setLoading(false))
   }, [selectedSlug])
 
-  // ── Derived: pre-subfolder filtered (status + search + advanced) ──────────
+  // ── Derived: was a 2nd repository (OneDrive) part of this scan? ────────────
+  const hasOnedrive = useMemo(
+    () => records.some((r) => r.onedrive !== "skipped"),
+    [records]
+  )
+
+  // ── Derived: pre-subfolder filtered (status + source + search + advanced) ──
   const preSubfiltered = useMemo<PhotoRecord[]>(() => {
     const SIZE_RANGES: Record<string, [number, number]> = {
       xs: [0, 500],
@@ -90,6 +97,15 @@ export default function HomePage() {
     }
     return records.filter((r) => {
       if (filterStatus !== "ALL" && r.safe_to_delete !== filterStatus) return false
+      // Source partition (Apple Photos vs OneDrive) — only when OneDrive was scanned
+      if (hasOnedrive && sourceFilter !== "all") {
+        const a = r.apple_photos === "yes"
+        const o = r.onedrive === "yes"
+        if (sourceFilter === "both" && !(a && o)) return false
+        if (sourceFilter === "apple" && !(a && !o)) return false
+        if (sourceFilter === "onedrive" && !(o && !a)) return false
+        if (sourceFilter === "neither" && (a || o)) return false
+      }
       if (search.trim()) {
         const lower = search.trim().toLowerCase()
         if (!r.filename.toLowerCase().includes(lower)) return false
@@ -121,7 +137,7 @@ export default function HomePage() {
       }
       return true
     })
-  }, [records, filterStatus, search, advFilters])
+  }, [records, filterStatus, sourceFilter, hasOnedrive, search, advFilters])
 
   // ── Derived: subfolderMap (counts reflect current status+search filter) ────
   const subfolderMap = useMemo<Map<string, number>>(() => {
@@ -157,6 +173,23 @@ export default function HomePage() {
       yesGB: yesSizeKb / 1024 / 1024,
       yesMB: yesSizeKb / 1024,
     }
+  }, [records])
+
+  // ── Derived: source partition counts (for the Source filter pills) ─────────
+  const sourceCounts = useMemo(() => {
+    let both = 0
+    let apple = 0
+    let onedrive = 0
+    let neither = 0
+    for (const r of records) {
+      const a = r.apple_photos === "yes"
+      const o = r.onedrive === "yes"
+      if (a && o) both++
+      else if (a) apple++
+      else if (o) onedrive++
+      else neither++
+    }
+    return { all: records.length, both, apple, onedrive, neither }
   }, [records])
 
   // ── Derived: filtered & sorted ─────────────────────────────────────────────
@@ -221,7 +254,7 @@ export default function HomePage() {
   ].filter(Boolean).length
 
   // ── Reset visibleCount only when filter/sort params change (not on import/delete) ──
-  const filterKey = filterStatus + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc) + String(groupByFolder) + JSON.stringify(advFilters)
+  const filterKey = filterStatus + sourceFilter + search + (selectedSubfolder ?? "") + sortBy + String(sortDesc) + String(groupByFolder) + JSON.stringify(advFilters)
   const prevFilterKey = useRef(filterKey)
   if (prevFilterKey.current !== filterKey) {
     prevFilterKey.current = filterKey
@@ -512,6 +545,10 @@ export default function HomePage() {
         onSelectSlug={(slug) => setSelectedSlug(slug)}
         filterStatus={filterStatus}
         onFilterStatus={setFilterStatus}
+        sourceFilter={sourceFilter}
+        onSourceFilter={setSourceFilter}
+        showSourceFilter={hasOnedrive}
+        sourceCounts={sourceCounts}
         search={search}
         onSearch={setSearch}
         sortBy={sortBy}
@@ -664,6 +701,7 @@ export default function HomePage() {
                       onView={handleView}
                       onOpenLightbox={() => handleOpenLightbox(r.path)}
                       thumbnailUrl={thumbnailUrl(r.path)}
+                      showSource={hasOnedrive}
                     />
                   )
                 })}

@@ -64,6 +64,7 @@ export interface ExifInfo {
 }
 
 export type FilterStatus = "ALL" | "YES" | "NO" | "MAYBE"
+export type SourceFilter = "all" | "both" | "apple" | "onedrive" | "neither"
 export type SortBy = "name" | "date" | "size" | "type"
 
 export interface AdvancedFilters {

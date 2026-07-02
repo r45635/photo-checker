@@ -1,7 +1,7 @@
 "use client"
 
 import clsx from "clsx"
-import { ArrowUpRight, Check, Film, ImageOff } from "lucide-react"
+import { ArrowUpRight, Check, Film, ImageOff, Aperture, Cloud } from "lucide-react"
 import { useState } from "react"
 import type { PhotoRecord } from "@/lib/types"
 
@@ -14,6 +14,7 @@ export interface PhotoCardProps {
   onView: (record: PhotoRecord) => void
   onOpenLightbox: () => void
   thumbnailUrl: string
+  showSource?: boolean
 }
 
 const STATUS_BORDER: Record<PhotoRecord["safe_to_delete"], string> = {
@@ -50,10 +51,13 @@ export default function PhotoCard({
   onView,
   onOpenLightbox,
   thumbnailUrl,
+  showSource = false,
 }: PhotoCardProps) {
   const [imgError, setImgError] = useState(false)
   const video = isVideo(record.filename)
   const badge = resolutionBadge(record)
+  const inApple = record.apple_photos === "yes"
+  const inOnedrive = record.onedrive === "yes"
 
   return (
     <div
@@ -91,6 +95,28 @@ export default function PhotoCard({
             <div className="w-6 h-6 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
               <Film size={12} className="text-white/70" />
             </div>
+          </div>
+        )}
+
+        {/* Source badges — top-right; only when a 2nd repository was scanned */}
+        {showSource && (inApple || inOnedrive) && (
+          <div className="absolute top-2 right-2 flex gap-1 pointer-events-none">
+            {inApple && (
+              <div
+                className="w-5 h-5 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center"
+                title="In Apple Photos"
+              >
+                <Aperture size={11} className="text-emerald-400" />
+              </div>
+            )}
+            {inOnedrive && (
+              <div
+                className="w-5 h-5 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center"
+                title="In OneDrive"
+              >
+                <Cloud size={11} className="text-sky-400" />
+              </div>
+            )}
           </div>
         )}
 
