@@ -31,7 +31,8 @@ A macOS tool that scans a local folder of photos and checks — by filename — 
   - **OneDrive** ✅ — via the [`rclone`](https://rclone.org) CLI; **no Azure app registration needed** (see [OneDrive setup](#onedrive-setup-optional))
   - **Google Photos** 🚧 *(coming soon)* — API backend exists, UI integration in progress
 - Labels each file: `YES` (likely duplicate — found with no check errors), `NO` (not found in any repository), `MAYBE` (found but a check errored — treat with caution)
-- Lets you select files and **move to Trash** (`send2trash`), **import to Apple Photos**, or **force-move** to a folder
+- **Filter by source** in the main UI: *Both · Apple only · OneDrive only · Neither* — with a source badge (◉ Apple / ☁ OneDrive) on every thumbnail
+- **Complete a backup in either direction**: select photos and **import to Apple Photos** (those not yet in Apple) or **upload to OneDrive** (those not yet in OneDrive), plus **move to Trash** / **force-move**. Available actions adapt to each photo's actual per-source presence.
 - Results are stored as JSON locally and browsable across sessions
 
 ---
@@ -135,12 +136,18 @@ rclone lsd onedrive:
 Then in the app's **Scan** dialog, expand **Cloud sources**, tick **Check against
 OneDrive**, and scan. The first scan indexes your entire OneDrive filename list once
 (this can take a few minutes on large drives) and caches it for 24 h; subsequent scans
-are instant.
+are instant. An optional **subfolder** field limits indexing to e.g. `Images` so a huge
+drive isn't walked in full.
 
 > **Why rclone?** Microsoft has deprecated personal-account app registrations outside a
 > directory, making the direct Graph API path require a paid Azure tenant. rclone
 > sidesteps this entirely and, because it lists all filenames once, is far faster than
 > one Graph API call per photo.
+
+**Uploading to OneDrive.** Photos not yet in OneDrive can be uploaded (single from the
+detail panel, or in bulk from the batch bar). They go into a dedicated
+`onedrive:PhotoChecker/` folder via `rclone copyto` — your existing files are never
+touched, and a name collision is auto-renamed (`… (2).jpg`) rather than overwritten.
 
 ### Config (for Google Photos)
 
@@ -287,6 +294,10 @@ Matching is **filename-based**, not hash-based — hashes change when metadata i
 | Path validation on thumbnail/video endpoints | `_validate_media_path()` blocks traversal into system paths and non-media extensions |
 | Thumbnails honor EXIF orientation | `ImageOps.exif_transpose()` rotates pixels per the EXIF Orientation tag so photos shot sideways render upright |
 | Thumbnail URLs are versioned (`&v=N`) | Thumbnails are cached 24 h; bumping the version busts the browser cache when the rendering logic changes (e.g. the orientation fix) |
+| Uploads use `rclone copyto` into a dedicated folder | `onedrive:PhotoChecker/`; collisions auto-rename (`… (2).jpg`) — existing files are never overwritten |
+| Batch actions driven by per-source presence | Import shows for `apple_photos == "no"`, upload for `onedrive == "no"` — so a "OneDrive-only" photo is still importable to Apple even though it's already safe to delete |
+| Imports persisted by path, not filename | `POST /api/patch-imported` matches records by full path so two files sharing a name in different subfolders aren't confused |
+| `content-visibility` for the photo grid | Off-screen cards skip layout/paint/decode (with `React.memo` + stable callbacks), keeping scroll smooth and memory flat on large libraries — no virtualization dependency |
 
 ## Tested
 

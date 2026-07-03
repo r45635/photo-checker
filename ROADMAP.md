@@ -111,11 +111,23 @@ Graph API path was dropped in favour of the `rclone` CLI (built-in OAuth, no Azu
 - [x] Security hardening (UUID validation, path traversal guard)
 - [x] Source filter in the main UX (All / Both / Apple only / OneDrive only / Neither) + per-thumbnail source badges
 - [x] Thumbnails honor EXIF orientation (`exif_transpose`) + versioned URLs to bust stale cache
+- [x] Upload to OneDrive (single + batch) — `rclone copyto` into a dedicated folder, collision-safe rename
+- [x] Batch actions adapt to per-source presence (import to Apple / upload to OneDrive shown per photo)
+- [x] Imports persisted path-safely (`/api/patch-imported`) so batch imports survive a reload
+- [x] Scroll perf on large libraries — `content-visibility` + `React.memo` (no dependency added)
 - [ ] Settings screen (API credentials, cache management)
 - [ ] Export filtered results as CSV
 - [ ] Dark/light mode
 - [x] Packaged macOS app (PyInstaller + Next.js static bundle) — `build.sh` + `photo_checker.spec`
 - [ ] Signed and notarized macOS app (requires Apple Developer Program)
+
+### Scaling the photo grid further (optional, if needed)
+The grid currently stays smooth via `content-visibility` + `React.memo` with **no added
+dependency** — good up to ~10–20k photos per result. For much larger libraries, the next
+step would be **true virtualization** (e.g. `react-virtuoso`'s `VirtuosoGrid` or
+`react-window`), which unmounts off-screen cards entirely. This adds a dependency and a
+grid/headers/shift-select rework, so it's deferred until a real need appears.
+- [ ] (If needed) Virtualized photo grid via `react-virtuoso` / `react-window`
 
 ---
 
@@ -125,6 +137,6 @@ Graph API path was dropped in favour of the `rclone` CLI (built-in OAuth, no Azu
 |---|---|---|
 | Filename-only matching | Renamed files not detected | Phase 3: EXIF date+size fallback |
 | Google cache is 24 h | Stale if you upload during the day | `--refresh-cache` flag exists; add UI button |
-| OneDrive: one API call per file | Slow for 5 000+ files | Phase 3: build an OneDrive filename cache |
-| Apple Photos only (Google/OneDrive not wired to UI) | Only one source checked | Phase 2 |
+| OneDrive uploads land in `PhotoChecker/`, not the indexed folder | A later scan indexing e.g. `Images` won't see them until re-indexed | Session record is patched immediately; future: union `path` + `upload_path` in the index |
+| Uploaded photos not auto-added to Apple Photos (and vice-versa) | Backup to one source doesn't fill the other | Use the per-source batch actions to complete both |
 | Apple Photos visual duplicate detection is opaque | Photos silently skips AI-detected duplicates — we can't tell which existing photo it matched | No bypass available via public API; treated as `already_in_photos` |
