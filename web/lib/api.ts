@@ -227,6 +227,14 @@ export async function refreshOnedrive(): Promise<{ ok: boolean; count: number }>
   return res.json()
 }
 
+// One-time OneDrive login via the bundled/PATH rclone (opens the browser).
+// Blocks until the login completes (or times out), so no per-request timeout.
+export async function connectOnedrive(): Promise<{ status: string }> {
+  const res = await fetch(`${BASE}/api/onedrive/connect`, { method: "POST" })
+  await throwIfNotOk(res)
+  return res.json()
+}
+
 export async function uploadToOnedrive(
   paths: string[],
   slug: string,

@@ -346,6 +346,92 @@ def onedrive_refresh() -> dict:
     return {"ok": True, "count": len(names)}
 
 
+@app.post("/api/onedrive/connect")
+def onedrive_connect() -> dict:
+    """Create an rclone 'onedrive' remote via a one-time browser login.
+
+    Uses the bundled (or PATH) rclone — no Azure app, no Terminal needed. rclone
+    handles the OAuth and opens the browser; we then fill drive_id/drive_type from
+    Microsoft Graph (rclone leaves them unset in non-interactive `config create`).
+    """
+    import time as _t
+    import configparser
+
+    pc = _pc()
+    if not pc.rclone_available():
+        raise HTTPException(status_code=400, detail="rclone not available")
+    rclone = pc._rclone_bin()
+
+    if "onedrive" in pc.onedrive_remotes():
+        return {"status": "already_connected"}
+
+    # Resolve rclone's config file path.
+    try:
+        out = subprocess.run([rclone, "config", "file"], capture_output=True, text=True, timeout=15).stdout
+        conf_path = Path(out.strip().splitlines()[-1].strip())
+    except Exception:
+        conf_path = Path.home() / ".config" / "rclone" / "rclone.conf"
+
+    # Launch OAuth; rclone opens the browser and writes the token to the config.
+    proc = subprocess.Popen(
+        [rclone, "config", "create", "onedrive", "onedrive"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    token = None
+    deadline = _t.time() + 120
+    try:
+        while _t.time() < deadline:
+            if conf_path.exists():
+                cp = configparser.ConfigParser()
+                try:
+                    cp.read(conf_path)
+                    if cp.has_option("onedrive", "token"):
+                        token = cp["onedrive"]["token"]
+                        break
+                except Exception:
+                    pass
+            if proc.poll() is not None and not token:
+                # rclone exited without producing a token → auth aborted/failed
+                if conf_path.exists():
+                    cp = configparser.ConfigParser()
+                    cp.read(conf_path)
+                    if cp.has_option("onedrive", "token"):
+                        token = cp["onedrive"]["token"]
+                break
+            _t.sleep(1.5)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+    if not token:
+        raise HTTPException(status_code=408, detail="OneDrive login was not completed")
+
+    # Fill drive_id/drive_type via Graph, writing directly to the config
+    # (rclone config update would re-trigger the OAuth flow).
+    try:
+        import json as _json
+        import requests as _req
+        access_token = _json.loads(token)["access_token"]
+        drive = _req.get(
+            "https://graph.microsoft.com/v1.0/me/drive",
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=20,
+        ).json()
+        cp = configparser.ConfigParser()
+        cp.read(conf_path)
+        cp["onedrive"]["drive_id"] = drive["id"]
+        cp["onedrive"]["drive_type"] = drive.get("driveType", "personal")
+        with open(conf_path, "w") as f:
+            cp.write(f)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not finalize OneDrive drive: {exc}")
+
+    return {"status": "connected"}
+
+
 def _resolve_onedrive_remote() -> str:
     """Return the configured OneDrive remote (auto-selecting when there's only one)."""
     remotes = _pc().onedrive_remotes()

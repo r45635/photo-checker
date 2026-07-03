@@ -6,6 +6,7 @@ import {
   scanFolder,
   getOnedriveStatus,
   saveOnedriveConfig,
+  connectOnedrive,
   type OnedriveStatus,
 } from "@/lib/api"
 
@@ -33,6 +34,8 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
   const [odEnabled, setOdEnabled] = useState(false)
   const [odExpanded, setOdExpanded] = useState(false)
   const [odPath, setOdPath] = useState("")
+  const [odConnecting, setOdConnecting] = useState(false)
+  const [odConnectError, setOdConnectError] = useState("")
 
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +94,21 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
       const status = await getOnedriveStatus()
       setOdStatus(status)
     } catch { /* ignore — status refresh will reflect reality */ }
+  }
+
+  async function handleConnectOnedrive() {
+    setOdConnecting(true)
+    setOdConnectError("")
+    try {
+      await connectOnedrive()             // opens the browser, resolves when logged in
+      const status = await getOnedriveStatus()
+      setOdStatus(status)
+      setOdPath(status.path ?? "")
+    } catch (e) {
+      setOdConnectError(e instanceof Error ? e.message : "OneDrive login failed")
+    } finally {
+      setOdConnecting(false)
+    }
   }
 
   async function handlePickFolder() {
@@ -349,17 +367,30 @@ export default function ScanDialog({ open, onClose, onScanned }: ScanDialogProps
                 </div>
               )}
 
-              {/* rclone installed but no onedrive remote */}
+              {/* rclone available but no onedrive remote → one-click connect */}
               {odStatus && odStatus.rclone_installed && odStatus.remotes.length === 0 && (
                 <div style={{ fontSize: "0.75rem", color: "#94a3b8", lineHeight: 1.6 }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: "6px", color: "#f59e0b", marginBottom: "6px" }}>
-                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: "2px" }} />
-                    <span>rclone is installed but no OneDrive remote is configured.</span>
-                  </div>
-                  <div style={{ background: "#0d1625", border: "1px solid #1a2840", borderRadius: "6px", padding: "8px 10px", fontFamily: "ui-monospace, Menlo, monospace", color: "#cbd5e1" }}>
-                    rclone config&nbsp;&nbsp;<span style={{ color: "#4a6080" }}># choose OneDrive, name it &quot;onedrive&quot;</span>
-                  </div>
-                  <p style={{ margin: "6px 0 0 0", color: "#4a6080" }}>No Azure app needed — rclone handles the login in your browser.</p>
+                  <p style={{ margin: "0 0 8px 0" }}>
+                    Connect your OneDrive to check and back up photos.
+                    <span style={{ color: "#4a6080" }}> No Azure app needed — a browser login opens.</span>
+                  </p>
+                  <button
+                    onClick={handleConnectOnedrive}
+                    disabled={odConnecting}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                      background: odConnecting ? "#1e3a5f" : "#0369a1", border: "none", borderRadius: "8px",
+                      padding: "8px 12px", fontSize: "0.8125rem", fontWeight: 500,
+                      color: "#fff", cursor: odConnecting ? "default" : "pointer",
+                    }}
+                  >
+                    {odConnecting
+                      ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Waiting for browser login…</>
+                      : <>Connect OneDrive</>}
+                  </button>
+                  {odConnectError && (
+                    <p style={{ margin: "6px 0 0 0", color: "#f43f5e" }}>{odConnectError}</p>
+                  )}
                 </div>
               )}
 

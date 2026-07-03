@@ -436,3 +436,41 @@ def test_patch_imported_by_path(tmp_path, monkeypatch):
     assert a["apple_photos"] == "yes" and a["safe_to_delete"] == "YES"
     assert "apple_photos" in a["found_in"] and "onedrive" in a["found_in"]
     assert b["apple_photos"] == "no"   # the same-named file in /b was NOT touched
+
+
+# ── rclone binary resolution + connect endpoint ───────────────────────────────
+
+def test_rclone_bin_dev_uses_path():
+    import photo_checker as pc
+    assert pc._rclone_bin() == "rclone"   # not frozen → PATH
+
+
+def test_rclone_bin_frozen_prefers_bundled(monkeypatch, tmp_path):
+    import photo_checker as pc
+    bundled = tmp_path / "rclone"
+    bundled.write_text("")   # pretend the bundled binary exists
+    monkeypatch.setattr(pc.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(pc.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert pc._rclone_bin() == str(bundled)
+
+
+def test_connect_no_rclone(monkeypatch):
+    import api.main as main
+    from fastapi import HTTPException
+    fake = MagicMock()
+    fake.rclone_available.return_value = False
+    with patch.object(main, "_pc", return_value=fake):
+        with pytest.raises(HTTPException) as exc:
+            main.onedrive_connect()
+    assert exc.value.status_code == 400
+
+
+def test_connect_already_connected(monkeypatch):
+    import api.main as main
+    fake = MagicMock()
+    fake.rclone_available.return_value = True
+    fake._rclone_bin.return_value = "rclone"
+    fake.onedrive_remotes.return_value = ["onedrive"]   # already there
+    with patch.object(main, "_pc", return_value=fake):
+        r = main.onedrive_connect()
+    assert r["status"] == "already_connected"
