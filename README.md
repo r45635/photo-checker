@@ -184,42 +184,48 @@ cd web && npm run dev                        # UI on :3000 → open http://local
 
 ---
 
-## Standalone macOS app (optional)
+## Standalone macOS app
 
-`build.sh` packages the app into a self-contained `Photo Checker.app` using PyInstaller and the pre-built Next.js static export. No Python or Node.js required to run the resulting app.
+A self-contained `Photo Checker.app` — no Python, Node.js, or rclone to install. It bundles
+the backend, the pre-built Next.js frontend, and the **rclone** binary (so OneDrive works
+out of the box), starts the backend, and opens `http://localhost:8000` automatically.
 
-### Build prerequisites
+### Install (recommended — download a release)
 
-- Python venv activated with `requirements.txt` installed
-- Node.js 18+ (needed at build time only)
+1. Download the latest `PhotoChecker-<version>.dmg` from the [Releases](../../releases) page
+   *(Apple Silicon)*.
+2. Open the DMG and drag **Photo Checker** into **Applications**.
+3. **First launch (unsigned build)** — right-click **Photo Checker.app** → **Open** → **Open**
+   (once), or run `xattr -cr "/Applications/Photo Checker.app"`.
+4. **Full Disk Access** (required to read the Apple Photos library):
+   System Settings → Privacy & Security → **Full Disk Access** → add **Photo Checker** → relaunch.
+5. **OneDrive** (optional): in the scan dialog, expand **Cloud sources** → **Connect OneDrive**
+   → log in once in the browser. Nothing else to install.
 
-### Build
+### Cutting a release (maintainers)
+
+Push a tag and GitHub Actions builds the DMG and publishes a Release:
 
 ```bash
-./build.sh
-# → dist/Photo Checker.app
+git tag v1.1.0 && git push origin v1.1.0
 ```
 
-### First launch (Gatekeeper)
+The [`release.yml`](.github/workflows/release.yml) workflow runs on macOS, builds the frontend
++ `.app` (PyInstaller, rclone bundled), packages the DMG, and attaches it to the Release.
 
-The app is **not signed or notarized**. On first launch macOS will block it. To open it:
+### Build locally
 
-1. In Finder, right-click **Photo Checker.app** → **Open**
-2. Click **Open** in the dialog
+```bash
+./build.sh                 # → dist/Photo Checker.app
+./scripts/package_dmg.sh   # → dist/PhotoChecker-<version>.dmg
+```
 
-This only needs to be done once.
+Prerequisites: a Python venv with `requirements.txt` installed, Node.js 18+, and `rclone`
+on PATH (`brew install rclone`) so it gets bundled.
 
-### Full Disk Access for the app
-
-The bundled app still needs Full Disk Access to read the Apple Photos library:
-
-1. **System Settings → Privacy & Security → Full Disk Access**
-2. Add **Photo Checker** to the list
-3. Relaunch the app
-
-### Usage
-
-Double-click `Photo Checker.app` — it starts the backend and opens `http://localhost:8000` automatically.
+> **Not signed/notarized.** Distributing to other Macs needs the right-click-Open workaround
+> above. Notarization (a smoother first launch) would require an Apple Developer account —
+> see ROADMAP. The build is **arm64 only** (Apple Silicon).
 
 ---
 
