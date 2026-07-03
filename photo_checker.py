@@ -447,6 +447,54 @@ def check_onedrive(filename: str, index: set | None) -> bool | None:
         return None
     return _nfc(filename).lower() in index
 
+
+# ── OneDrive upload (via rclone) ──────────────────────────────────────────────────
+
+
+def onedrive_dir_names(remote: str, path: str) -> set:
+    """Return the set of filenames already present in a OneDrive destination folder.
+
+    Used to avoid name collisions when uploading. Returns an empty set if the
+    folder does not exist yet (rclone lsf on a missing dir just yields nothing).
+    """
+    try:
+        return _fetch_onedrive_filenames(remote, path=path)
+    except Exception:
+        return set()
+
+
+def _unique_dest_name(name: str, taken: set) -> str:
+    """Return `name`, or `stem (2).ext`, `stem (3).ext`… so it never collides.
+
+    `taken` holds already-used names (NFC-lowercased). The chosen name is added
+    by the caller. Mirrors the macOS/`_COPY_SUFFIX_RE` numbering convention.
+    """
+    p = Path(name)
+    stem, suffix = p.stem, p.suffix
+    candidate = name
+    n = 2
+    while _nfc(candidate).lower() in taken:
+        candidate = f"{stem} ({n}){suffix}"
+        n += 1
+    return candidate
+
+
+def onedrive_upload(remote: str, dest_dir: str, local_path: Path,
+                    dest_name: str, timeout: int = 300) -> None:
+    """Upload one file to `<remote>:<dest_dir>/<dest_name>` via `rclone copyto`.
+
+    Raises RuntimeError on failure. rclone verifies the transfer (size/hash) and
+    creates the destination folder automatically.
+    """
+    target = f"{remote}:{dest_dir}/{dest_name}" if dest_dir else f"{remote}:{dest_name}"
+    proc = subprocess.run(
+        ['rclone', 'copyto', str(local_path), target, '--no-traverse'],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or f"rclone copyto exited {proc.returncode}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():

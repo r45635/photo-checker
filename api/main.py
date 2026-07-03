@@ -346,6 +346,111 @@ def onedrive_refresh() -> dict:
     return {"ok": True, "count": len(names)}
 
 
+def _resolve_onedrive_remote() -> str:
+    """Return the configured OneDrive remote (auto-selecting when there's only one)."""
+    remotes = _pc().onedrive_remotes()
+    remote = _load_config().get("onedrive", {}).get("remote")
+    if not remote and len(remotes) == 1:
+        remote = remotes[0]
+    if not remote or remote not in remotes:
+        raise HTTPException(status_code=400, detail="No OneDrive remote configured")
+    return remote
+
+
+class _OneDriveUploadBody(BaseModel):
+    paths: list[str]
+    slug: str
+
+
+@app.post("/api/onedrive/upload")
+async def onedrive_upload(body: _OneDriveUploadBody) -> StreamingResponse:
+    """Upload files to a dedicated OneDrive folder via rclone, streaming SSE progress.
+
+    Uploads into `config.onedrive.upload_path` (default 'PhotoChecker'); never
+    overwrites — colliding names get a ' (2)' suffix. On success each record is
+    patched to onedrive='yes' and safe_to_delete recomputed.
+    """
+    import asyncio
+    import queue as _queue
+    import threading
+
+    pc = _pc()
+    if not pc.rclone_available():
+        raise HTTPException(status_code=400, detail="rclone not installed")
+    remote = _resolve_onedrive_remote()
+    dest_dir = (_load_config().get("onedrive", {}).get("upload_path") or "PhotoChecker").strip().strip("/")
+
+    paths = [Path(p) for p in body.paths]
+    q: _queue.Queue = _queue.Queue()
+
+    def _run() -> None:
+        try:
+            taken = pc.onedrive_dir_names(remote, dest_dir)  # NFC-lowercased names already there
+            succeeded: list[str] = []
+            errors: list[dict] = []
+            total = len(paths)
+            for i, src in enumerate(paths, 1):
+                q.put({"type": "progress", "current": i - 1, "total": total, "file": src.name})
+                try:
+                    _validate_media_path(str(src))
+                    if not src.is_file():
+                        raise RuntimeError("file not found")
+                    dest_name = pc._unique_dest_name(src.name, taken)
+                    taken.add(_nfc(dest_name).lower())
+                    pc.onedrive_upload(remote, dest_dir, src, dest_name)
+                    succeeded.append(str(src))
+                except HTTPException as exc:
+                    errors.append({"path": str(src), "error": exc.detail})
+                except Exception as exc:
+                    errors.append({"path": str(src), "error": str(exc)})
+                q.put({"type": "progress", "current": i, "total": total, "file": src.name})
+
+            # Patch the result JSON for uploaded files (mirror patch_record logic)
+            if succeeded:
+                try:
+                    records = _load_result_file(body.slug)
+                    done = set(succeeded)
+                    for rec in records:
+                        if rec.get("path") in done:
+                            rec["onedrive"] = "yes"
+                            repos = [f for f in ("apple_photos", "google_photos", "onedrive")
+                                     if rec.get(f) == "yes"]
+                            rec["found_in"] = ", ".join(repos) if repos else "—"
+                            has_error = any(rec.get(f) == "error"
+                                            for f in ("apple_photos", "google_photos", "onedrive"))
+                            if repos and not has_error:
+                                rec["safe_to_delete"] = "YES"
+                            elif repos:
+                                rec["safe_to_delete"] = "MAYBE"
+                    _save_result_file(body.slug, records)
+                except Exception as exc:
+                    _log("ERROR", f"onedrive upload patch failed: {exc}")
+
+            q.put({"type": "done", "uploaded": succeeded, "errors": errors, "dest": dest_dir})
+        except Exception as exc:
+            _log("ERROR", f"onedrive upload failed: {exc}")
+            q.put({"type": "error", "detail": str(exc)})
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    async def _generate():
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                item = await loop.run_in_executor(None, q.get, True, 1.0)
+                yield f"data: {json.dumps(item)}\n\n"
+                if item["type"] in ("done", "error"):
+                    break
+            except _queue.Empty:
+                yield 'data: {"type":"ping"}\n\n'
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 # ── GET /api/results ─────────────────────────────────────────────────────────────
 
 @app.get("/api/results")
@@ -1266,6 +1371,35 @@ def patch_record(body: PatchBody) -> dict[str, str]:
 
     _save_result_file(body.slug, records)
     return {"status": "patched", "filename": body.filename}
+
+
+class _PatchImportedBody(BaseModel):
+    slug: str
+    paths: list[str]
+
+
+@app.post("/api/patch-imported")
+def patch_imported(body: _PatchImportedBody) -> dict[str, int]:
+    """Persist an Apple-Photos import for a batch of files, matched by PATH.
+
+    Path-based (not filename) so files sharing a name in different subfolders are
+    patched correctly. Loads/saves the result file once.
+    """
+    records = _load_result_file(body.slug)
+    done = set(body.paths)
+    patched = 0
+    for rec in records:
+        if rec.get("path") in done:
+            rec["apple_photos"] = "yes"
+            rec["match_confidence"] = "high"
+            rec["match_reason"] = "Explicitly imported to Apple Photos"
+            repos = [f for f in ("apple_photos", "google_photos", "onedrive") if rec.get(f) == "yes"]
+            rec["found_in"] = ", ".join(repos) if repos else "—"
+            has_error = any(rec.get(f) == "error" for f in ("apple_photos", "google_photos", "onedrive"))
+            rec["safe_to_delete"] = "YES" if (repos and not has_error) else ("MAYBE" if repos else "NO")
+            patched += 1
+    _save_result_file(body.slug, records)
+    return {"patched": patched}
 
 
 # ── POST /api/delete ─────────────────────────────────────────────────────────────

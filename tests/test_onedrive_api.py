@@ -313,3 +313,126 @@ def test_do_scan_onedrive_index_fails_degrades_to_skipped(tmp_path, monkeypatch)
     assert results[0]["apple_photos"] == "yes"
     assert results[0]["onedrive"] == "skipped"      # degraded, not "error"
     assert results[0]["safe_to_delete"] == "YES"    # not MAYBE
+
+
+# ── OneDrive upload: helpers ──────────────────────────────────────────────────
+
+def test_unique_dest_name_no_collision():
+    import photo_checker as pc
+    assert pc._unique_dest_name("new.jpg", {"other.jpg"}) == "new.jpg"
+
+
+def test_unique_dest_name_collision_suffixes():
+    import photo_checker as pc
+    taken = {"img_1234.jpg"}
+    assert pc._unique_dest_name("IMG_1234.JPG", taken) == "IMG_1234 (2).JPG"
+    taken.add("img_1234 (2).jpg")
+    assert pc._unique_dest_name("IMG_1234.JPG", taken) == "IMG_1234 (3).JPG"
+
+
+def test_onedrive_upload_builds_correct_rclone_command():
+    import photo_checker as pc
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+        stderr = ""
+
+    def _run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _Proc()
+
+    with patch("subprocess.run", side_effect=_run):
+        pc.onedrive_upload("onedrive", "PhotoChecker", Path("/local/IMG_1.jpg"), "IMG_1.jpg")
+    assert captured["cmd"][:2] == ["rclone", "copyto"]
+    assert captured["cmd"][2] == "/local/IMG_1.jpg"
+    assert captured["cmd"][3] == "onedrive:PhotoChecker/IMG_1.jpg"
+    assert "--no-traverse" in captured["cmd"]
+
+
+def test_onedrive_upload_raises_on_failure():
+    import photo_checker as pc
+
+    class _Proc:
+        returncode = 1
+        stderr = "quota exceeded"
+
+    with patch("subprocess.run", return_value=_Proc()):
+        with pytest.raises(RuntimeError, match="quota exceeded"):
+            pc.onedrive_upload("onedrive", "PhotoChecker", Path("/x.jpg"), "x.jpg")
+
+
+# ── OneDrive upload: endpoint patches records ─────────────────────────────────
+
+def test_upload_endpoint_patches_record(tmp_path, monkeypatch):
+    """After a successful upload the record flips onedrive->yes, safe_to_delete->YES."""
+    import api.main as main
+    import asyncio
+
+    # A real local source file (endpoint checks src.is_file())
+    src = _make_fake_jpg(tmp_path / "a.jpg")
+
+    # A result file with one photo not in OneDrive
+    slug = "T"
+    monkeypatch.setattr(main, "RESULTS_DIR", tmp_path)
+    (tmp_path / f"{slug}.json").write_text(json.dumps([{
+        "filename": "a.jpg", "path": str(src),
+        "apple_photos": "no", "google_photos": "skipped", "onedrive": "no",
+        "found_in": "—", "safe_to_delete": "NO",
+    }]))
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"onedrive": {"remote": "onedrive", "upload_path": "PhotoChecker"}}))
+    monkeypatch.setattr(main, "_CONFIG_FILE", cfg)
+
+    fake_pc = MagicMock()
+    fake_pc.rclone_available.return_value = True
+    fake_pc.onedrive_remotes.return_value = ["onedrive"]
+    fake_pc.onedrive_dir_names.return_value = set()
+    fake_pc._unique_dest_name.side_effect = lambda name, taken: name
+    fake_pc.onedrive_upload.return_value = None
+
+    async def _drain():
+        with (
+            patch.object(main, "_pc", return_value=fake_pc),
+            patch.object(main, "_validate_media_path", return_value=src),
+        ):
+            resp = await main.onedrive_upload(main._OneDriveUploadBody(paths=[str(src)], slug=slug))
+            events = []
+            async for chunk in resp.body_iterator:
+                for line in chunk.split("\n"):
+                    if line.startswith("data: "):
+                        events.append(json.loads(line[6:]))
+            return events
+
+    events = asyncio.run(_drain())
+    done = [e for e in events if e.get("type") == "done"]
+    assert done and done[0]["uploaded"] == [str(src)] and not done[0]["errors"]
+
+    # Record patched on disk
+    rec = json.loads((tmp_path / f"{slug}.json").read_text())[0]
+    assert rec["onedrive"] == "yes"
+    assert rec["safe_to_delete"] == "YES"
+    assert "onedrive" in rec["found_in"]
+
+
+# ── patch-imported (path-based batch persist) ─────────────────────────────────
+
+def test_patch_imported_by_path(tmp_path, monkeypatch):
+    import api.main as main
+    monkeypatch.setattr(main, "RESULTS_DIR", tmp_path)
+    slug = "R"
+    (tmp_path / f"{slug}.json").write_text(json.dumps([
+        {"filename": "dup.jpg", "path": "/a/dup.jpg", "apple_photos": "no",
+         "google_photos": "skipped", "onedrive": "yes", "found_in": "onedrive", "safe_to_delete": "YES"},
+        {"filename": "dup.jpg", "path": "/b/dup.jpg", "apple_photos": "no",
+         "google_photos": "skipped", "onedrive": "no", "found_in": "—", "safe_to_delete": "NO"},
+    ]))
+    # Patch only /a/dup.jpg → path-safe (same filename, different folders)
+    res = main.patch_imported(main._PatchImportedBody(slug=slug, paths=["/a/dup.jpg"]))
+    assert res["patched"] == 1
+    recs = json.loads((tmp_path / f"{slug}.json").read_text())
+    a = next(r for r in recs if r["path"] == "/a/dup.jpg")
+    b = next(r for r in recs if r["path"] == "/b/dup.jpg")
+    assert a["apple_photos"] == "yes" and a["safe_to_delete"] == "YES"
+    assert "apple_photos" in a["found_in"] and "onedrive" in a["found_in"]
+    assert b["apple_photos"] == "no"   # the same-named file in /b was NOT touched
