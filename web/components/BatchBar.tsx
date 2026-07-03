@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { X, Upload, Trash2, AlertTriangle, CheckSquare } from "lucide-react"
+import { X, Trash2, AlertTriangle, CheckSquare, UploadCloud, Aperture } from "lucide-react"
 import type { PhotoRecord } from "@/lib/types"
-import { deletePhotos, movePhotos, importPhoto, pickFolder } from "@/lib/api"
+import { deletePhotos, movePhotos, importPhoto, patchImportedBatch, uploadToOnedrive, pickFolder } from "@/lib/api"
 
 interface BatchBarProps {
   batch: Set<string>
@@ -12,6 +12,7 @@ interface BatchBarProps {
   onClear: () => void
   onDeleted: (paths: string[], message: string) => void
   onImported: (paths: string[]) => void
+  onUploadedOnedrive: (paths: string[]) => void
   onSelectAll: () => void
 }
 
@@ -21,6 +22,7 @@ type ConfirmState =
   | { type: "force"; step: 1; destFolder: string }
   | { type: "force"; step: 2; destFolder: string; typedText: string; progress: number | null }
   | { type: "import"; step: 1; progress: number | null }
+  | { type: "onedrive"; step: 1; progress: number | null; total: number }
 
 export default function BatchBar({
   batch,
@@ -29,6 +31,7 @@ export default function BatchBar({
   onClear,
   onDeleted,
   onImported,
+  onUploadedOnedrive,
   onSelectAll,
 }: BatchBarProps) {
   const [confirmState, setConfirmState] = useState<ConfirmState>(null)
@@ -44,7 +47,11 @@ export default function BatchBar({
   const noCount = batchRecords.filter((r) => r.safe_to_delete === "NO").length
   const maybeCount = batchRecords.filter((r) => r.safe_to_delete === "MAYBE").length
 
-  const canImport = batchRecords.filter((r) => r.safe_to_delete === "NO")
+  // Action eligibility is driven by ACTUAL per-source presence, not safe_to_delete,
+  // so you can complete a backup in either direction (e.g. a OneDrive-only photo is
+  // still importable to Apple Photos even though it's already "safe to delete").
+  const canImport = batchRecords.filter((r) => r.apple_photos === "no")   // not in Apple → importable
+  const canUpload = batchRecords.filter((r) => r.onedrive === "no")       // not in OneDrive → uploadable
   const canDelete = batchRecords.filter((r) => r.safe_to_delete === "YES")
   const canForce = batchRecords.filter(
     (r) => r.safe_to_delete === "NO" || r.safe_to_delete === "MAYBE"
@@ -128,6 +135,14 @@ export default function BatchBar({
         failed.push(canImport[i].filename)
       }
     }
+    // Persist the imports to the result JSON (path-based) so they survive a reload.
+    if (succeeded.length > 0) {
+      try {
+        await patchImportedBatch(slug, succeeded)
+      } catch {
+        /* in-memory state still updates; disk patch is best-effort */
+      }
+    }
     setIsProcessing(false)
     if (failed.length > 0) {
       setErrorMsg(`${failed.length} import(s) failed: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? ` … +${failed.length - 3}` : ""}`)
@@ -135,6 +150,33 @@ export default function BatchBar({
       closeConfirm()
     }
     if (succeeded.length > 0) onImported(succeeded)
+  }
+
+  function handleUploadClick() {
+    setErrorMsg(null)
+    setConfirmState({ type: "onedrive", step: 1, progress: null, total: canUpload.length })
+  }
+
+  async function executeUpload() {
+    setIsProcessing(true)
+    setErrorMsg(null)
+    const paths = canUpload.map((r) => r.path)
+    try {
+      const res = await uploadToOnedrive(paths, slug, (current, total) => {
+        setConfirmState({ type: "onedrive", step: 1, progress: current, total })
+      })
+      setIsProcessing(false)
+      if (res.errors.length > 0) {
+        const names = res.errors.slice(0, 3).map((e) => e.path.split("/").pop()).join(", ")
+        setErrorMsg(`${res.errors.length} upload(s) failed: ${names}${res.errors.length > 3 ? ` … +${res.errors.length - 3}` : ""}`)
+      } else {
+        closeConfirm()
+      }
+      if (res.uploaded.length > 0) onUploadedOnedrive(res.uploaded)
+    } catch (e: any) {
+      setErrorMsg(e.message ?? "Upload failed")
+      setIsProcessing(false)
+    }
   }
 
   return (
@@ -336,7 +378,7 @@ export default function BatchBar({
             {confirmState.type === "import" && (
               <>
                 <div className="mb-1 flex items-center gap-2 text-emerald-400">
-                  <Upload size={16} />
+                  <Aperture size={16} />
                   <h2 className="text-base font-semibold">Import to Apple Photos?</h2>
                 </div>
                 <p className="mb-4 text-xs text-[#4a6080]">
@@ -380,6 +422,55 @@ export default function BatchBar({
                     className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
                   >
                     {isProcessing ? "Importing…" : `Import ${canImport.length}`}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ONEDRIVE UPLOAD confirmation */}
+            {confirmState.type === "onedrive" && (
+              <>
+                <div className="mb-1 flex items-center gap-2 text-sky-400">
+                  <UploadCloud size={16} />
+                  <h2 className="text-base font-semibold">Upload to OneDrive?</h2>
+                </div>
+                <p className="mb-4 text-xs text-[#4a6080]">
+                  {canUpload.length} file(s) will be copied to your OneDrive
+                  (folder <span className="font-mono text-slate-400">PhotoChecker/</span>).
+                  This writes to your cloud and uses quota. Existing files are never overwritten.
+                </p>
+                <FilenameList records={canUpload} />
+                {confirmState.progress !== null && (
+                  <div className="mt-4">
+                    <div className="mb-1 flex justify-between text-xs text-[#4a6080]">
+                      <span>Uploading…</span>
+                      <span>{confirmState.progress} / {confirmState.total}</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1a2840]">
+                      <div
+                        className="h-full rounded-full bg-sky-500 transition-all duration-200"
+                        style={{ width: `${confirmState.total ? Math.round((confirmState.progress / confirmState.total) * 100) : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {errorMsg && (
+                  <p className="mt-3 text-xs text-rose-400">{errorMsg}</p>
+                )}
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    onClick={closeConfirm}
+                    disabled={isProcessing}
+                    className="rounded-lg border border-[#1a2840] px-4 py-2 text-sm font-medium text-slate-400 transition-colors duration-150 hover:border-[#2a3850] hover:text-slate-300 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={executeUpload}
+                    disabled={isProcessing}
+                    className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {isProcessing ? "Uploading…" : `Upload ${canUpload.length}`}
                   </button>
                 </div>
               </>
@@ -429,14 +520,27 @@ export default function BatchBar({
             Select all visible
           </button>
 
-          {/* Import */}
+          {/* Add to Apple Photos */}
           {canImport.length > 0 && (
             <button
               onClick={handleImportClick}
+              title="Import to Apple Photos"
               className="flex items-center gap-1.5 rounded-lg border border-emerald-600/30 bg-emerald-600/20 px-4 py-2 text-sm font-medium text-emerald-400 transition-colors duration-150 hover:bg-emerald-600/30"
             >
-              <Upload size={14} />
-              Import {canImport.length}
+              <Aperture size={14} />
+              Apple {canImport.length}
+            </button>
+          )}
+
+          {/* Add to OneDrive */}
+          {canUpload.length > 0 && (
+            <button
+              onClick={handleUploadClick}
+              title="Upload to OneDrive"
+              className="flex items-center gap-1.5 rounded-lg border border-sky-600/30 bg-sky-600/20 px-4 py-2 text-sm font-medium text-sky-400 transition-colors duration-150 hover:bg-sky-600/30"
+            >
+              <UploadCloud size={14} />
+              OneDrive {canUpload.length}
             </button>
           )}
 

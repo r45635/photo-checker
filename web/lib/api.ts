@@ -125,6 +125,16 @@ export async function patchRecord(slug: string, filename: string): Promise<void>
   await throwIfNotOk(res)
 }
 
+// Persist an Apple-Photos import for one or more files, matched by path.
+export async function patchImportedBatch(slug: string, paths: string[]): Promise<void> {
+  const res = await fetch(`${BASE}/api/patch-imported`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug, paths }),
+  })
+  await throwIfNotOk(res)
+}
+
 export async function deletePhotos(
   paths: string[],
   slug: string
@@ -215,4 +225,41 @@ export async function refreshOnedrive(): Promise<{ ok: boolean; count: number }>
   const res = await fetch(`${BASE}/api/onedrive/refresh`, { method: "POST" })
   await throwIfNotOk(res)
   return res.json()
+}
+
+export async function uploadToOnedrive(
+  paths: string[],
+  slug: string,
+  onProgress?: (current: number, total: number, file: string) => void
+): Promise<{ uploaded: string[]; errors: { path: string; error: string }[]; dest: string }> {
+  const res = await fetch(`${BASE}/api/onedrive/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths, slug }),
+  })
+  await throwIfNotOk(res)
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = JSON.parse(line.slice(6))
+      if (data.type === "progress" && onProgress) {
+        onProgress(data.current, data.total, data.file)
+      } else if (data.type === "done") {
+        return { uploaded: data.uploaded ?? [], errors: data.errors ?? [], dest: data.dest ?? "" }
+      } else if (data.type === "error") {
+        throw new Error(data.detail)
+      }
+    }
+  }
+  throw new Error("Upload stream ended unexpectedly")
 }

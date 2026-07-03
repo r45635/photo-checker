@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon, FolderOpen } from "lucide-react"
+import { X, Star, Cloud, CloudOff, ExternalLink, CheckCircle2, Loader2, Image as ImageIcon, FolderOpen, UploadCloud } from "lucide-react"
 import type { ApplePhotoInfo, ExifInfo, PhotoRecord } from "@/lib/types"
 import {
   thumbnailUrl,
@@ -10,7 +10,8 @@ import {
   getAppleInfo,
   getExif,
   importPhoto,
-  patchRecord,
+  patchImportedBatch,
+  uploadToOnedrive,
   openInPhotos,
   openInFinder,
 } from "@/lib/api"
@@ -21,6 +22,7 @@ interface DetailPanelProps {
   slug: string
   onClose: () => void
   onImported: (path: string) => void
+  onUploadedOnedrive: (path: string) => void
   onOpenLightbox?: (path: string) => void
 }
 
@@ -84,13 +86,15 @@ function fmtCoord(lat: number, lon: number): string {
   return `${Math.abs(lat).toFixed(5)}° ${latDir},  ${Math.abs(lon).toFixed(5)}° ${lonDir}`
 }
 
-export default function DetailPanel({ record, slug, onClose, onImported, onOpenLightbox }: DetailPanelProps) {
+export default function DetailPanel({ record, slug, onClose, onImported, onUploadedOnedrive, onOpenLightbox }: DetailPanelProps) {
   const [appleInfo, setAppleInfo] = useState<ApplePhotoInfo | null>(null)
   const [appleLoading, setAppleLoading] = useState(false)
   const [appleError, setAppleError] = useState(false)
   const [importLoading, setImportLoading] = useState(false)
   const [importDone, setImportDone] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [thumbError, setThumbError] = useState(false)
   const [appleThumbError, setAppleThumbError] = useState(false)
   const [exifInfo, setExifInfo] = useState<ExifInfo | null>(null)
@@ -102,10 +106,11 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
     setAppleError(false)
     setImportDone(false)
     setImportError(null)
+    setUploadError(null)
     setThumbError(false)
     setAppleThumbError(false)
 
-    if (record.safe_to_delete === "YES") {
+    if (record.apple_photos === "yes") {
       setAppleLoading(true)
       getAppleInfo(record.filename, record.path)
         .then((info) => {
@@ -118,7 +123,7 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
           setAppleLoading(false)
         })
     }
-  }, [record?.filename, record?.safe_to_delete])
+  }, [record?.filename, record?.apple_photos])
 
   useEffect(() => {
     if (!record) return
@@ -132,13 +137,31 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
     setImportError(null)
     try {
       await importPhoto(record.path)
-      await patchRecord(slug, record.filename)
+      await patchImportedBatch(slug, [record.path])
       setImportDone(true)
       onImported(record.path)
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Import failed")
     } finally {
       setImportLoading(false)
+    }
+  }
+
+  async function handleUploadOnedrive() {
+    if (!record) return
+    setUploadLoading(true)
+    setUploadError(null)
+    try {
+      const res = await uploadToOnedrive([record.path], slug)
+      if (res.errors.length > 0) {
+        setUploadError(res.errors[0].error || "Upload failed")
+      } else {
+        onUploadedOnedrive(record.path)
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed")
+    } finally {
+      setUploadLoading(false)
     }
   }
 
@@ -352,8 +375,8 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                 </section>
               )}
 
-              {/* Section C: Apple Photos (only if YES) */}
-              {record.safe_to_delete === "YES" && (
+              {/* Section C: Apple Photos (only if the photo is in Apple Photos) */}
+              {record.apple_photos === "yes" && (
                 <section>
                   <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">
                     Apple Photos
@@ -464,7 +487,7 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
               )}
 
               {/* Section D: Import CTA (only if NO) */}
-              {record.safe_to_delete === "NO" && (
+              {record.apple_photos === "no" && (
                 <section>
                   <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">
                     Import
@@ -477,7 +500,7 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                   ) : (
                     <div className="flex flex-col gap-3">
                       <div className="bg-[#0d1625] border border-[#1a2840] rounded-xl px-4 py-3 text-xs text-[#4a6080]">
-                        This photo has no backup in Apple Photos.
+                        This photo is not in Apple Photos.
                       </div>
                       {importError && (
                         <p className="text-xs text-rose-400">{importError}</p>
@@ -524,6 +547,22 @@ export default function DetailPanel({ record, slug, onClose, onImported, onOpenL
                   >
                     {record.onedrive}
                   </span>
+                </div>
+              )}
+              {record.onedrive === "no" && (
+                <div className="pt-1">
+                  <button
+                    onClick={handleUploadOnedrive}
+                    disabled={uploadLoading}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-sky-600/30 bg-sky-600/20 px-3 py-1.5 text-xs font-medium text-sky-400 transition-colors duration-150 hover:bg-sky-600/30 disabled:opacity-50"
+                  >
+                    {uploadLoading ? (
+                      <><Loader2 size={12} className="animate-spin" /> Uploading…</>
+                    ) : (
+                      <><UploadCloud size={12} /> Upload to OneDrive</>
+                    )}
+                  </button>
+                  {uploadError && <p className="mt-1 text-xs text-rose-400">{uploadError}</p>}
                 </div>
               )}
               <div className="flex items-center justify-between text-xs">

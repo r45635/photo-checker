@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import Sidebar from "@/components/Sidebar"
 import PhotoCard from "@/components/PhotoCard"
@@ -325,13 +325,13 @@ export default function HomePage() {
   // ── Lightbox ───────────────────────────────────────────────────────────────
   const lightboxPaths = useMemo(() => filtered.map((r) => r.path), [filtered])
 
-  function handleOpenLightbox(path: string) {
+  // ── Handlers (memoized so PhotoCard's React.memo skips re-renders on scroll) ──
+  const handleOpenLightbox = useCallback((path: string) => {
     const idx = filteredIndexMap.get(path)
     if (idx !== undefined) setLightboxIndex(idx)
-  }
+  }, [filteredIndexMap])
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
-  function handleSelect(path: string) {
+  const handleSelect = useCallback((path: string) => {
     const idx = filteredIndexMap.get(path) ?? -1
     if (idx >= 0) lastSelectedIndex.current = idx
     setBatch((prev) => {
@@ -343,9 +343,9 @@ export default function HomePage() {
       }
       return next
     })
-  }
+  }, [filteredIndexMap])
 
-  function handleShiftSelect(index: number) {
+  const handleShiftSelect = useCallback((index: number) => {
     const anchor = lastSelectedIndex.current
     if (anchor < 0) {
       const r = filtered[index]
@@ -361,28 +361,31 @@ export default function HomePage() {
       toAdd.forEach((p) => next.add(p))
       return next
     })
-  }
+  }, [filtered, handleSelect])
 
   function handleSelectAll() {
     setBatch(new Set(filtered.map((r) => r.path)))
   }
 
-  function handleView(record: PhotoRecord) {
+  const handleView = useCallback((record: PhotoRecord) => {
     setDetail(record)
-  }
+  }, [])
 
   function handleClose() {
     setDetail(null)
   }
 
+  function addApplePhotos(r: PhotoRecord): PhotoRecord {
+    const found_in = r.found_in && r.found_in !== "—" && !r.found_in.includes("apple_photos")
+      ? `apple_photos, ${r.found_in}`
+      : r.found_in && r.found_in !== "—"
+      ? r.found_in
+      : "apple_photos"
+    return { ...r, apple_photos: "yes", found_in, safe_to_delete: "YES" }
+  }
+
   function handleImported(path: string) {
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.path === path
-          ? { ...r, apple_photos: "yes", safe_to_delete: "YES" }
-          : r
-      )
-    )
+    setRecords((prev) => prev.map((r) => (r.path === path ? addApplePhotos(r) : r)))
     setBatch((prev) => {
       const next = new Set(prev)
       next.delete(path)
@@ -404,18 +407,42 @@ export default function HomePage() {
       setDetail(nextPhoto)
     }
 
-    setRecords((prev) =>
-      prev.map((r) =>
-        set.has(r.path)
-          ? { ...r, apple_photos: "yes", safe_to_delete: "YES" }
-          : r
-      )
-    )
+    setRecords((prev) => prev.map((r) => (set.has(r.path) ? addApplePhotos(r) : r)))
     setBatch((prev) => {
       const next = new Set(prev)
       paths.forEach((p) => next.delete(p))
       return next
     })
+  }
+
+  function handleUploadedOnedrive(paths: string | string[]) {
+    const list = Array.isArray(paths) ? paths : [paths]
+    const set = new Set(list)
+
+    // Advance the detail panel to the next non-uploaded photo (like import).
+    if (detail && set.has(detail.path)) {
+      const currentIdx = filteredIndexMap.get(detail.path) ?? -1
+      const nextPhoto =
+        filtered.slice(currentIdx + 1).find((r) => !set.has(r.path)) ??
+        filtered.slice(0, currentIdx).reverse().find((r) => !set.has(r.path)) ??
+        null
+      setDetail(nextPhoto)
+    }
+
+    // onedrive → yes ⇒ found somewhere ⇒ safe to delete (no error case here).
+    setRecords((prev) =>
+      prev.map((r) =>
+        set.has(r.path)
+          ? { ...r, onedrive: "yes", found_in: r.found_in && r.found_in !== "—" ? `${r.found_in}, onedrive` : "onedrive", safe_to_delete: "YES" }
+          : r
+      )
+    )
+    setBatch((prev) => {
+      const next = new Set(prev)
+      list.forEach((p) => next.delete(p))
+      return next
+    })
+    setToast(`${list.length} photo${list.length !== 1 ? "s" : ""} uploaded to OneDrive`)
   }
 
   function handleDeleted(paths: string[], message?: string) {
@@ -699,7 +726,7 @@ export default function HomePage() {
                       onSelect={handleSelect}
                       onShiftSelect={handleShiftSelect}
                       onView={handleView}
-                      onOpenLightbox={() => handleOpenLightbox(r.path)}
+                      onOpenLightbox={handleOpenLightbox}
                       thumbnailUrl={thumbnailUrl(r.path)}
                       showSource={hasOnedrive}
                     />
@@ -730,6 +757,7 @@ export default function HomePage() {
         slug={selectedSlug ?? ""}
         onClose={handleClose}
         onImported={handleImported}
+        onUploadedOnedrive={handleUploadedOnedrive}
         onOpenLightbox={handleOpenLightbox}
       />
 
@@ -742,6 +770,7 @@ export default function HomePage() {
           onClear={() => setBatch(new Set())}
           onDeleted={handleDeleted}
           onImported={handleImportedBatch}
+          onUploadedOnedrive={handleUploadedOnedrive}
           onSelectAll={handleSelectAll}
         />
       )}

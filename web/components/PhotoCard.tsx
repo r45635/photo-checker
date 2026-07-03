@@ -2,7 +2,7 @@
 
 import clsx from "clsx"
 import { ArrowUpRight, Check, Film, ImageOff, Aperture, Cloud } from "lucide-react"
-import { useState } from "react"
+import { memo, useState } from "react"
 import type { PhotoRecord } from "@/lib/types"
 
 export interface PhotoCardProps {
@@ -12,7 +12,7 @@ export interface PhotoCardProps {
   onSelect: (path: string) => void
   onShiftSelect: (index: number) => void
   onView: (record: PhotoRecord) => void
-  onOpenLightbox: () => void
+  onOpenLightbox: (path: string) => void
   thumbnailUrl: string
   showSource?: boolean
 }
@@ -42,7 +42,7 @@ function resolutionBadge(record: PhotoRecord): { color: string; mp: string; tip:
   return null
 }
 
-export default function PhotoCard({
+function PhotoCard({
   record,
   index,
   selected,
@@ -69,8 +69,11 @@ export default function PhotoCard({
         STATUS_BORDER[record.safe_to_delete],
         selected && "ring-2 ring-blue-500 ring-offset-1 ring-offset-[#060a10]"
       )}
+      // Off-screen cards skip layout/paint/decode and release decoded image memory;
+      // `auto` remembers each card's real size after first paint so the scrollbar stays true.
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 240px" }}
       onClick={() => onView(record)}
-      onDoubleClick={() => onOpenLightbox()}
+      onDoubleClick={() => onOpenLightbox(record.path)}
       title={record.safe_to_delete === "MAYBE" ? "Found in at least one source but a check errored — verify before deleting" : undefined}
     >
       {/* Thumbnail */}
@@ -85,6 +88,7 @@ export default function PhotoCard({
             alt={record.filename}
             className="w-full h-full object-cover"
             loading="lazy"
+            decoding="async"
             onError={() => setImgError(true)}
           />
         )}
@@ -207,3 +211,7 @@ export default function PhotoCard({
     </div>
   )
 }
+
+// Memoized: with stable callbacks from the parent, cards don't re-render on each
+// infinite-scroll batch — only new or changed (e.g. selected) cards do.
+export default memo(PhotoCard)
