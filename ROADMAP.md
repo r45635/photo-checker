@@ -119,7 +119,10 @@ Graph API path was dropped in favour of the `rclone` CLI (built-in OAuth, no Azu
 - [ ] Export filtered results as CSV
 - [ ] Dark/light mode
 - [x] Packaged macOS app (PyInstaller + Next.js static bundle) — `build.sh` + `photo_checker.spec`
-- [ ] Signed and notarized macOS app (requires Apple Developer Program)
+- [x] One-click release: bundled **rclone**, drag-to-Applications **DMG** (`scripts/package_dmg.sh`), and a **tag → GitHub Release** workflow (`.github/workflows/release.yml`)
+- [x] In-app **Connect OneDrive** (rclone OAuth from the app — no Terminal, no Azure)
+- [ ] Signed and notarized macOS app (requires Apple Developer Program) — smoother first launch, no Gatekeeper workaround
+- [ ] Intel / universal2 build (current DMG is Apple Silicon only)
 
 ### Scaling the photo grid further (optional, if needed)
 The grid currently stays smooth via `content-visibility` + `React.memo` with **no added
