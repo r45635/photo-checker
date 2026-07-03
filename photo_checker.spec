@@ -1,14 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for Photo Checker — macOS self-contained .app bundle."""
 
+import os
+import shutil
 from pathlib import Path
 
 ROOT = Path(SPECPATH)
 
+# Bundle the rclone binary (for OneDrive) so the app is fully self-contained.
+# Resolve through any symlink (Homebrew installs a symlink into /opt/homebrew/bin).
+_rclone = shutil.which("rclone")
+_binaries = []
+if _rclone:
+    _rclone_real = os.path.realpath(_rclone)
+    _binaries.append((_rclone_real, "."))
+    print(f"[spec] bundling rclone: {_rclone_real}")
+else:
+    print("[spec] WARNING: rclone not found — OneDrive will require an external install")
+
 a = Analysis(
     [str(ROOT / "api" / "main.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=_binaries,
     datas=[
         # Pre-built Next.js static frontend
         (str(ROOT / "web" / "out"), "web/out"),
@@ -95,7 +108,7 @@ app_bundle = BUNDLE(
     icon=None,
     bundle_identifier="com.vcruvellier.photo-checker",
     info_plist={
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleShortVersionString": os.environ.get("PHOTOCHECKER_VERSION", "1.0.0"),
         "CFBundleDisplayName": "Photo Checker",
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription": "Photo Checker uses Apple Events to control Photos.app.",

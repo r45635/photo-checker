@@ -345,9 +345,19 @@ def check_google(filename: str, index: set | None) -> bool | None:
 # unlike the old Graph API which cost one HTTP request per photo.
 
 
+def _rclone_bin() -> str:
+    """Path to the rclone binary — the one bundled inside the packaged .app if
+    present (PyInstaller `sys._MEIPASS`), otherwise `rclone` from PATH."""
+    if getattr(sys, 'frozen', False):
+        bundled = Path(getattr(sys, '_MEIPASS', '')) / 'rclone'
+        if bundled.exists():
+            return str(bundled)
+    return 'rclone'
+
+
 def rclone_available() -> bool:
-    """True if the rclone binary is on PATH."""
-    return shutil.which('rclone') is not None
+    """True if an rclone binary is available (bundled in the .app or on PATH)."""
+    return _rclone_bin() != 'rclone' or shutil.which('rclone') is not None
 
 
 def onedrive_remotes() -> list[str]:
@@ -356,7 +366,7 @@ def onedrive_remotes() -> list[str]:
         return []
     try:
         out = subprocess.run(
-            ['rclone', 'listremotes', '--long'],
+            [_rclone_bin(), 'listremotes', '--long'],
             capture_output=True, text=True, timeout=15,
         ).stdout
     except Exception:
@@ -380,7 +390,7 @@ def _fetch_onedrive_filenames(remote: str, path: str = '', on_progress=None) -> 
     names: set[str] = set()
     target = f'{remote}:{path}' if path else f'{remote}:'
     proc = subprocess.Popen(
-        ['rclone', 'lsf', '--recursive', '--files-only', target],
+        [_rclone_bin(), 'lsf', '--recursive', '--files-only', target],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
     )
     assert proc.stdout is not None
@@ -488,7 +498,7 @@ def onedrive_upload(remote: str, dest_dir: str, local_path: Path,
     """
     target = f"{remote}:{dest_dir}/{dest_name}" if dest_dir else f"{remote}:{dest_name}"
     proc = subprocess.run(
-        ['rclone', 'copyto', str(local_path), target, '--no-traverse'],
+        [_rclone_bin(), 'copyto', str(local_path), target, '--no-traverse'],
         capture_output=True, text=True, timeout=timeout,
     )
     if proc.returncode != 0:
