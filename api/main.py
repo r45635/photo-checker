@@ -86,7 +86,10 @@ app = FastAPI(title="photo-checker API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # Local app: allow localhost AND 127.0.0.1 on any port (dev :3000, bundled :8000).
+    # A hardcoded host list breaks when the browser origin differs from the baked API
+    # base (e.g. VS Code Simple Browser pins 127.0.0.1 while the bundle calls localhost).
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1613,17 +1616,26 @@ def open_photos(body: OpenPhotosBody) -> dict[str, str]:
 
 @app.get("/api/pick-folder")
 def pick_folder() -> dict[str, str]:
-    """Open native macOS folder chooser via osascript. Returns {path}."""
+    """Open native macOS folder chooser via osascript. Returns {path}.
+
+    The server process is not a foreground GUI app, so the dialog would open
+    *behind* the browser. We bring System Events to the front first so the
+    chooser is frontmost and focused.
+    """
     try:
         result = subprocess.run(
-            ["osascript", "-e",
-             'POSIX path of (choose folder with prompt "Select folder to scan")'],
+            ["osascript",
+             "-e", 'tell application "System Events" to activate',
+             "-e", 'POSIX path of (choose folder with prompt "Select folder to scan")'],
             capture_output=True, text=True, timeout=300,
         )
+        path = result.stdout.strip().rstrip("/")
+        _log("INFO", f"pick-folder: rc={result.returncode} path={path!r} err={result.stderr.strip()!r}")
         if result.returncode != 0:
             return {"path": ""}
-        return {"path": result.stdout.strip().rstrip("/")}
-    except Exception:
+        return {"path": path}
+    except Exception as e:
+        _log("ERROR", f"pick-folder: exception {e!r}")
         return {"path": ""}
 
 
